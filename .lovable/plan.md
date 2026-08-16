@@ -49,5 +49,4 @@ Current project state: fresh TanStack Start template (placeholder home page, no 
 
 ## What I'll need from you
 
-- Your **Fly.io organisation token** (I'll open a secure form for `FLY_API_TOKEN` when we reach step 6).
-- Locally: Docker Desktop + the Compact compiler for the one-time contract compile and deploy — I'll give you the exact commands.
+- Your **Fly.io organisation token** — that's it. I'll open a secure form for `FLY_API_TOKEN` when we reach step 6, then provision the stack, compile the contract and deploy it from this sandbox.
