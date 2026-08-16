@@ -313,7 +313,7 @@ function StackDetail({
   destroyLoading,
 }: {
   stack: StackSummary;
-  readiness: Awaited<ReturnType<typeof checkFullStack>> | null | undefined;
+  readiness: ReadinessResult | null | undefined;
   readinessLoading: boolean;
   checking: boolean;
   onCheck: () => void;
