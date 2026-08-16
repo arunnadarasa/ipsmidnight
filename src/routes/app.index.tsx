@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, FileHeart, IdCard, Moon } from "lucide-react";
+import { Activity, Cloud, FileHeart, IdCard, Moon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { SectionHeading, Panel } from "@/components/SectionHeading";
 import { TruncatedMono } from "@/components/MonoValue";
