@@ -56,9 +56,14 @@ function Dashboard() {
         title="International Patient Summary console"
         description="Compose an IPS bundle, issue it as a verifiable credential, then anchor a commitment on the Midnight Undeployed network. Clinical content stays in your workspace."
         actions={
-          <Button asChild>
-            <Link to="/app/ips">New summary</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link to="/app/deploy"><Cloud className="mr-1.5 h-4 w-4" />Provision stack</Link>
+            </Button>
+            <Button asChild>
+              <Link to="/app/ips">New summary</Link>
+            </Button>
+          </div>
         }
       />
 
