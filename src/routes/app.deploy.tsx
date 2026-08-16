@@ -397,7 +397,8 @@ function StackDetail({
   );
 }
 
-type MachineLike = { name: string; id: string; state: string; region?: string | null };
+
+
 
 function HalfCard({
   title,
