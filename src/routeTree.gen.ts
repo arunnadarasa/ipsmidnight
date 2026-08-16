@@ -14,6 +14,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppActivityRouteImport } from './routes/app.activity'
+import { Route as AppIpsRouteImport } from './routes/app.ips'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,18 +41,25 @@ const AppActivityRoute = AppActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => AppRoute,
 } as any)
+const AppIpsRoute = AppIpsRouteImport.update({
+  id: '/ips',
+  path: '/ips',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/auth': typeof AuthRoute
   '/app/activity': typeof AppActivityRoute
+  '/app/ips': typeof AppIpsRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app/activity': typeof AppActivityRoute
+  '/app/ips': typeof AppIpsRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -60,14 +68,16 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/auth': typeof AuthRoute
   '/app/activity': typeof AppActivityRoute
+  '/app/ips': typeof AppIpsRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/app' | '/auth' | '/app/activity' | '/app/'
+  fullPaths: '/' | '/app' | '/auth' | '/app/activity' | '/app/ips' | '/app/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/app/activity' | '/app'
-  id: '__root__' | '/' | '/app' | '/auth' | '/app/activity' | '/app/'
+  to: '/' | '/auth' | '/app/activity' | '/app/ips' | '/app'
+  id:
+    '__root__' | '/' | '/app' | '/auth' | '/app/activity' | '/app/ips' | '/app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -113,16 +123,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppActivityRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/ips': {
+      id: '/app/ips'
+      path: '/ips'
+      fullPath: '/app/ips'
+      preLoaderRoute: typeof AppIpsRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppActivityRoute: typeof AppActivityRoute
+  AppIpsRoute: typeof AppIpsRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppActivityRoute: AppActivityRoute,
+  AppIpsRoute: AppIpsRoute,
   AppIndexRoute: AppIndexRoute,
 }
 
