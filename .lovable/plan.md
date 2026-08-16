@@ -32,7 +32,7 @@ Current project state: fresh TanStack Start template (placeholder home page, no 
 3. IPS domain layer: FHIR IPS types, section registry, validator, canonical-JSON digest helper, sample bundles.
 4. IPS builder / upload / viewer pages.
 5. Identus layer: `*.server.ts` clients (health, DIDs, connectionless issuance) + `identus.functions.ts` wrappers, simulated mode fallback, console pages.
-6. Midnight layer: Compact contract (`IpsAnchor.compact`, insert-only append), local deploy script, Fly provisioning server functions, health preflight, faucet, anchor route.
+6. Midnight layer: Fly provisioning server functions (node, indexer, proof server, faucet) + health preflight + faucet button; Compact contract (`IpsAnchor.compact`, insert-only append) compiled in this sandbox and deployed against the Fly stack; anchor route.
 7. Verify page + activity log.
 8. SEO heads per route, security scan, publish.
 
