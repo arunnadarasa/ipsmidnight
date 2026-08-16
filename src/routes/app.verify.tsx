@@ -25,7 +25,7 @@ export const Route = createFileRoute("/app/verify")({
       { property: "og:description", content: "Digest, credential, and ledger commitment checks in one pass." },
     ],
   }),
-  component: VerifyWorkspace;
+  component: VerifyWorkspace,
 });
 
 type Check = { label: string; ok: boolean | null; detail: string };
