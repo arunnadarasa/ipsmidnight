@@ -102,13 +102,12 @@ function DeployConsole() {
   );
 
   // Poll readiness for the selected stack while it is not ready.
-  const readiness = useQuery({
+  const readiness = useQuery<ReadinessResult | null>({
     queryKey: ["stack_readiness", selected?.appPrefix],
-    queryKeyHashOptions: { hashKey: ["stack_readiness", selected?.appPrefix] },
-    queryFn: () => (selected ? check({ data: { appPrefix: selected.appPrefix } }) : null),
+    queryFn: async () => (selected ? ((await check({ data: { appPrefix: selected.appPrefix } })) as ReadinessResult) : null),
     enabled: Boolean(selected),
     refetchInterval: (q) => {
-      const d = q.state.data as { allReady?: boolean } | null;
+      const d = q.state.data as ReadinessResult | null;
       return d && d.allReady ? false : 12000;
     },
   });
