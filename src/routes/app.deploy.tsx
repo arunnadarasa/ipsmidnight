@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StickyActionBar } from "@/components/StickyActionBar";
 import { FLY_REGIONS } from "@/lib/midnight/shared";
 import {
   provisionFullStack,
@@ -25,6 +24,27 @@ import {
   destroyFullStack,
   listStacks,
 } from "@/lib/stack.functions";
+
+type MachineLike = { name: string; id: string; state: string; region?: string | null };
+
+type ReadinessResult = {
+  identus: {
+    urls: { appName: string; agentUrl: string; didcommUrl: string };
+    machines: MachineLike[];
+    health: { probes: { name: string; ok: boolean; status: number | null; detail: string }[]; ready: boolean };
+    status: string;
+    ready: boolean;
+  };
+  midnight: {
+    urls: { appName: string; indexerUrl: string; indexerWsUrl: string; proofUrl: string; nodeUrl: string };
+    machines: MachineLike[];
+    probes: { indexer: { ok: boolean; status: number | null; detail: string }; proof: { ok: boolean; status: number | null; detail: string }; blockHeight: number | null };
+    status: string;
+    ready: boolean;
+  };
+  allReady: boolean;
+  appPrefix: string;
+};
 
 export const Route = createFileRoute("/app/deploy")({
   head: () => ({
