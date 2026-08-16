@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "file": "index.js",
+  "sourceRoot": "../../../../",
+  "sources": ["contracts/IpsAnchorRegistry.compact", "compiler/standard-library.compact"],
+  "names": [],
+  "mappings": ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;EAcA;;;;;;;;;;;;;MAMA,AAAA,aASC;;;;;cAT4B,YAAqB;;;;;;;;;;;;;;;;;;yCAArB,YAAqB;;;;;;;;;+CAArB,YAAqB;;;OASjD;;;;GAbA;EAFD;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;IARA;;;;;;;;;yEAAoC;IACpC;;;;;;;;;yEAAyC;IACzC;;;;;;;;;yEAAqC;IACrC;;;;;;;;;;yEAA0C;UAMxC,KAAY;IAAZ;;;;;;;;;;6FAAA,KAAY;;;;wEAAA;;;;;;;GACb;EChBD,AAAA,kBAAA;oEAAA;;;EDYA,AAAA,iBAAoC;;0DAApC,cAAoC;;;;;;;;;;;;;;GAAA;EAQpC,AAAA,gBASC,4BAT4B,YAAqB;UAC1C,IAAqB;UACrB,KAAwC;+EAAlC;;;;;;;;;;;oJAAY;;UAClB,QAAkF;6CAAT,KAAG;6CAAE,IAAE;IAEtF;;;;;;;2HAA2B,YAAU;;yEAAtB;IACf;;;;;;;2HAAuB,QAAM;;yEAAlB;IACX;;;;;;;;;;2HAA4B,YAAU;;;;;wEAA3B;UACX,KAAY;IAAZ;;;;;;;;;;6FAAA,KAAY;;;;wEAAA;;GACb;;;;;;;;;;;;;;;;IAvBD;qCAAA;;;;;;;;;;;0GAAoC;KAAA;IACpC;qCAAA;;;;;;;;;;;0GAAyC;KAAA;IACzC;qCAAA;;;;;;;;;;;0GAAqC;KAAA;IACrC;;;;;uCAAA;;;;;;;;;;;;;;;;4GAA0C;;;;;;uCAA1C;;;;;;;;;;;;4GAA0C;;;;;;;;;;;;;;uCAA1C;;;;;;;;;;;;;;;4GAA0C;;;;;;;;;KAAA;;;;;;;;;;"
+}
