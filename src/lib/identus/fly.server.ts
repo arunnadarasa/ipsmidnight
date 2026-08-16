@@ -302,7 +302,7 @@ export async function destroyIdentusStack(appName: string) {
  * in already scoped to the caller (RLS as the user).
  */
 export async function recordIdentusDeployment(
-  supabase: import("@/integrations/supabase/client.server").SupabaseClient,
+  supabase: SupabaseClient<Database>,
   userId: string,
   input: { appPrefix: string; region: string; label?: string },
   result: IdentusProvisionResult,
