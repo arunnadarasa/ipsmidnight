@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const PREFIX_RE = /^[a-z][a-z0-9-]{2,28}$/;
 
-function validatePrefix(input: { appPrefix: string }) {
+function validatePrefix<T extends { appPrefix: string; region: string; label?: string; orgSlug?: string }>(input: T): T {
   const prefix = input.appPrefix.trim().toLowerCase();
   if (!PREFIX_RE.test(prefix)) {
     throw new Error("App prefix must be 3-29 chars: lowercase letters, numbers, hyphens.");
