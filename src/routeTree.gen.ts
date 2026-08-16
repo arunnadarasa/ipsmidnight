@@ -15,6 +15,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppActivityRouteImport } from './routes/app.activity'
 import { Route as AppIpsRouteImport } from './routes/app.ips'
+import { Route as AppMidnightRouteImport } from './routes/app.midnight'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const AppIpsRoute = AppIpsRouteImport.update({
   path: '/ips',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMidnightRoute = AppMidnightRouteImport.update({
+  id: '/midnight',
+  path: '/midnight',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/app/activity': typeof AppActivityRoute
   '/app/ips': typeof AppIpsRoute
+  '/app/midnight': typeof AppMidnightRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
@@ -60,6 +67,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/app/activity': typeof AppActivityRoute
   '/app/ips': typeof AppIpsRoute
+  '/app/midnight': typeof AppMidnightRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -69,15 +77,30 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/app/activity': typeof AppActivityRoute
   '/app/ips': typeof AppIpsRoute
+  '/app/midnight': typeof AppMidnightRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/app' | '/auth' | '/app/activity' | '/app/ips' | '/app/'
+  fullPaths:
+    | '/'
+    | '/app'
+    | '/auth'
+    | '/app/activity'
+    | '/app/ips'
+    | '/app/midnight'
+    | '/app/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/app/activity' | '/app/ips' | '/app'
+  to: '/' | '/auth' | '/app/activity' | '/app/ips' | '/app/midnight' | '/app'
   id:
-    '__root__' | '/' | '/app' | '/auth' | '/app/activity' | '/app/ips' | '/app/'
+    | '__root__'
+    | '/'
+    | '/app'
+    | '/auth'
+    | '/app/activity'
+    | '/app/ips'
+    | '/app/midnight'
+    | '/app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -130,18 +153,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIpsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/midnight': {
+      id: '/app/midnight'
+      path: '/midnight'
+      fullPath: '/app/midnight'
+      preLoaderRoute: typeof AppMidnightRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppActivityRoute: typeof AppActivityRoute
   AppIpsRoute: typeof AppIpsRoute
+  AppMidnightRoute: typeof AppMidnightRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppActivityRoute: AppActivityRoute,
   AppIpsRoute: AppIpsRoute,
+  AppMidnightRoute: AppMidnightRoute,
   AppIndexRoute: AppIndexRoute,
 }
 
