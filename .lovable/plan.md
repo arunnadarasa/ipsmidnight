@@ -32,7 +32,7 @@ Current project state: fresh TanStack Start template (placeholder home page, no 
 3. IPS domain layer: FHIR IPS types, section registry, validator, canonical-JSON digest helper, sample bundles.
 4. IPS builder / upload / viewer pages.
 5. Identus layer: `*.server.ts` clients (health, DIDs, connectionless issuance) + `identus.functions.ts` wrappers, simulated mode fallback, console pages.
-6. Midnight layer: Compact contract (`IpsAnchor.compact`, insert-only append), local deploy script, Fly provisioning server functions, health preflight, faucet, anchor route.
+6. Midnight layer: Fly provisioning server functions (node, indexer, proof server, faucet) + health preflight + faucet button; Compact contract (`IpsAnchor.compact`, insert-only append) compiled in this sandbox and deployed against the Fly stack; anchor route.
 7. Verify page + activity log.
 8. SEO heads per route, security scan, publish.
 
@@ -43,11 +43,10 @@ Current project state: fresh TanStack Start template (placeholder home page, no 
 - **Undeployed writes are server-append.** Lace cannot sign on Undeployed, so anchoring goes through `/api/public/ips-anchor` using the genesis seed (`…0002`), with shared constants (`PRIVATE_STATE_ID`, store name, password, deterministic deployer secret) in `src/lib/midnight-shared.ts` so deploy and append agree. If the contract JSON is missing the route fails loudly — never a fake `0xSIMULATED` "anchored" state.
 - **Ledger shape is insert-only.** Anchors go into an append map under a fresh random id; no key is ever overwritten (overwrites crash the dust fee balancer).
 - **Fly.io:** browser talks to the proof server over its public HTTPS URL; server-to-server calls use `.internal` 6PN names. Health grid probes node first. Faucet retries with backoff for ~90s on cold boot. Contract address resolves from deploy JSON first, env second.
-- **Compact compile + deploy stay local** (`compact compile`, then `bun scripts/deploy-midnight.mjs`); the app reads `src/data/midnight-contract.undeployed.json`. Documented on `/docs`.
+- **Compact compile + deploy run here in the sandbox.** I install the Compact toolchain (`compact-installer.sh` + `compact update`), run `compact compile contracts/IpsAnchor.compact contracts/managed/ips-anchor`, copy `keys/` and `zkir/` into `public/`, then run `bun scripts/deploy-midnight.mjs` against your Fly-hosted node/indexer/proof-server over public HTTPS — no Docker or local machine needed. The deploy writes `src/data/midnight-contract.undeployed.json`, which the app reads (deploy JSON first, env second). `/docs` documents the same commands for reproducing it yourself.
 - **No SSR for Midnight JS:** all `@midnight-ntwrk/*` browser usage sits behind a client-only boundary; `optimizeDeps.exclude` list added from day one.
 - **PHI handling:** clinical content stays in your Cloud database under RLS; only a digest/commitment ever reaches the chain. Clearly labelled demo software, not for real patient data.
 
 ## What I'll need from you
 
-- Your **Fly.io organisation token** (I'll open a secure form for `FLY_API_TOKEN` when we reach step 6).
-- Locally: Docker Desktop + the Compact compiler for the one-time contract compile and deploy — I'll give you the exact commands.
+- Your **Fly.io organisation token** — that's it. I'll open a secure form for `FLY_API_TOKEN` when we reach step 6, then provision the stack, compile the contract and deploy it from this sandbox.
