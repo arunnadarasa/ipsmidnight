@@ -44,11 +44,14 @@ export type Database = {
       agent_connections: {
         Row: {
           api_key: string | null
+          app_prefix: string | null
           base_url: string | null
           created_at: string
+          didcomm_url: string | null
           id: string
           is_active: boolean
           label: string
+          last_error: string | null
           metadata: Json
           mode: string
           readiness_status: string
@@ -57,11 +60,14 @@ export type Database = {
         }
         Insert: {
           api_key?: string | null
+          app_prefix?: string | null
           base_url?: string | null
           created_at?: string
+          didcomm_url?: string | null
           id?: string
           is_active?: boolean
           label: string
+          last_error?: string | null
           metadata?: Json
           mode?: string
           readiness_status?: string
@@ -70,11 +76,14 @@ export type Database = {
         }
         Update: {
           api_key?: string | null
+          app_prefix?: string | null
           base_url?: string | null
           created_at?: string
+          didcomm_url?: string | null
           id?: string
           is_active?: boolean
           label?: string
+          last_error?: string | null
           metadata?: Json
           mode?: string
           readiness_status?: string
@@ -151,12 +160,15 @@ export type Database = {
       }
       fly_deployments: {
         Row: {
+          agent_url: string | null
           app_prefix: string
           created_at: string
+          didcomm_url: string | null
           faucet_url: string | null
           id: string
           indexer_url: string | null
           indexer_ws_url: string | null
+          kind: string
           last_error: string | null
           machines: Json
           node_url: string | null
@@ -167,12 +179,15 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          agent_url?: string | null
           app_prefix: string
           created_at?: string
+          didcomm_url?: string | null
           faucet_url?: string | null
           id?: string
           indexer_url?: string | null
           indexer_ws_url?: string | null
+          kind?: string
           last_error?: string | null
           machines?: Json
           node_url?: string | null
@@ -183,12 +198,15 @@ export type Database = {
           user_id: string
         }
         Update: {
+          agent_url?: string | null
           app_prefix?: string
           created_at?: string
+          didcomm_url?: string | null
           faucet_url?: string | null
           id?: string
           indexer_url?: string | null
           indexer_ws_url?: string | null
+          kind?: string
           last_error?: string | null
           machines?: Json
           node_url?: string | null
