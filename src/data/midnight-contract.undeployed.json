@@ -1,0 +1,9 @@
+{
+  "address": "0000000000000000000000000000000000000000000000000000000000000000",
+  "deployTx": null,
+  "network": "undeployed",
+  "privateStateId": "ips-anchor-registry",
+  "circuit": "anchorSummary",
+  "compactVersion": "0.23",
+  "deployedAt": null
+}
