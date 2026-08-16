@@ -432,7 +432,7 @@ function HalfCard({
       subtitle={subtitle}
       actions={
         <span className={"flex items-center gap-1.5 text-xs " + tone}>
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <StatusDot tone={ready ? "ok" : status === "error" ? "err" : "pending"} />}
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <StatusDot status={ready ? "ok" : status === "error" ? "error" : "pending"} />}
           {status}
         </span>
       }
