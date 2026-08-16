@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import {
   IDENTUS_DB,
   IDENTUS_IMAGES,
@@ -290,6 +292,53 @@ export async function identusDiagnostics(appName: string) {
 export async function destroyIdentusStack(appName: string) {
   await flyOptional(`/apps/${appName}?force=true`, { method: "DELETE" });
   return { destroyed: true };
+}
+
+/**
+ * Persists the Identus provision result: writes the `fly_deployments` row
+ * (kind=identus) and the active `agent_connections` row carrying the admin key.
+ * Shared by `provisionIdentusAgent` and the unified `provisionFullStack` so the
+ * admin-key storage path stays single-sourced. The supabase client is passed
+ * in already scoped to the caller (RLS as the user).
+ */
+export async function recordIdentusDeployment(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  input: { appPrefix: string; region: string; label?: string },
+  result: IdentusProvisionResult,
+) {
+  await supabase.from("fly_deployments").upsert(
+    {
+      user_id: userId,
+      kind: "identus",
+      app_prefix: input.appPrefix,
+      region: input.region,
+      status: "provisioning",
+      last_error: null,
+      agent_url: result.agentUrl,
+      didcomm_url: result.didcommUrl,
+      machines: result.machines as never,
+    },
+    { onConflict: "user_id,app_prefix,kind" },
+  );
+
+  await supabase.from("agent_connections").update({ is_active: false }).eq("user_id", userId);
+  await supabase.from("agent_connections").upsert(
+    {
+      user_id: userId,
+      label: input.label?.trim() || `Fly agent ${result.appName}`,
+      mode: "fly",
+      base_url: result.agentUrl,
+      didcomm_url: result.didcommUrl,
+      api_key: result.adminKey,
+      app_prefix: input.appPrefix,
+      readiness_status: "provisioning",
+      is_active: true,
+      last_error: null,
+      metadata: { appName: result.appName } as never,
+    },
+    { onConflict: "user_id, app_prefix" },
+  );
 }
 
 /** Rewrites DIDCOMM_SERVICE_URL and republishes port 8090 without a full redeploy. */

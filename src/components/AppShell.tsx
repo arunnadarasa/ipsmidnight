@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Activity, FileHeart, IdCard, LayoutDashboard, LogOut, Menu, Moon, ShieldCheck } from "lucide-react";
+import { Activity, Cloud, FileHeart, IdCard, LayoutDashboard, LogOut, Menu, Moon, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { signOut } from "@/hooks/useAuth";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/deploy", label: "Deploy", icon: Cloud },
   { to: "/app/ips", label: "Summaries", icon: FileHeart },
   { to: "/app/identus", label: "Identus", icon: IdCard },
   { to: "/app/midnight", label: "Midnight", icon: Moon },

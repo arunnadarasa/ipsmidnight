@@ -33,39 +33,8 @@ export const provisionIdentusAgent = createServerFn({ method: "POST" })
       throw new Error(message);
     }
 
-    await supabase.from("fly_deployments").upsert(
-      {
-        user_id: userId,
-        kind: "identus",
-        app_prefix: data.appPrefix,
-        region: data.region,
-        status: "provisioning",
-        last_error: null,
-        agent_url: result.agentUrl,
-        didcomm_url: result.didcommUrl,
-        machines: result.machines as never,
-      },
-      { onConflict: "user_id,app_prefix,kind" },
-    );
-
-    // The connection row carries the admin key used for every agent REST call.
-    await supabase.from("agent_connections").update({ is_active: false }).eq("user_id", userId);
-    await supabase.from("agent_connections").upsert(
-      {
-        user_id: userId,
-        label: data.label?.trim() || `Fly agent ${result.appName}`,
-        mode: "fly",
-        base_url: result.agentUrl,
-        didcomm_url: result.didcommUrl,
-        api_key: result.adminKey,
-        app_prefix: data.appPrefix,
-        readiness_status: "provisioning",
-        is_active: true,
-        last_error: null,
-        metadata: { appName: result.appName } as never,
-      },
-      { onConflict: "user_id,app_prefix" },
-    );
+    const { recordIdentusDeployment } = await import("./fly.server");
+    await recordIdentusDeployment(supabase, userId, { appPrefix: data.appPrefix, region: data.region, ...(data.label ? { label: data.label } : {}) }, result);
 
     await supabase.from("activity_log").insert({
       user_id: userId,
