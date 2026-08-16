@@ -126,7 +126,10 @@ function DeployConsole() {
   });
 
   const destroyMut = useMutation({
-    mutationFn: () => (selected ? destroy({ data: { appPrefix: selected.appPrefix } }) : null),
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return destroy({ data: { appPrefix: selected.appPrefix } });
+    },
     onSuccess: () => {
       toast.success("IPS stack destroyed.");
       setActivePrefix(null);
