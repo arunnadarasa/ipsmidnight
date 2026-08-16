@@ -17,6 +17,7 @@ import { Route as AppActivityRouteImport } from './routes/app.activity'
 import { Route as AppIdentusRouteImport } from './routes/app.identus'
 import { Route as AppIpsRouteImport } from './routes/app.ips'
 import { Route as AppMidnightRouteImport } from './routes/app.midnight'
+import { Route as AppVerifyRouteImport } from './routes/app.verify'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,6 +59,11 @@ const AppMidnightRoute = AppMidnightRouteImport.update({
   path: '/midnight',
   getParentRoute: () => AppRoute,
 } as any)
+const AppVerifyRoute = AppVerifyRouteImport.update({
+  id: '/verify',
+  path: '/verify',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -67,6 +73,7 @@ export interface FileRoutesByFullPath {
   '/app/identus': typeof AppIdentusRoute
   '/app/ips': typeof AppIpsRoute
   '/app/midnight': typeof AppMidnightRoute
+  '/app/verify': typeof AppVerifyRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/app/identus': typeof AppIdentusRoute
   '/app/ips': typeof AppIpsRoute
   '/app/midnight': typeof AppMidnightRoute
+  '/app/verify': typeof AppVerifyRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/app/identus': typeof AppIdentusRoute
   '/app/ips': typeof AppIpsRoute
   '/app/midnight': typeof AppMidnightRoute
+  '/app/verify': typeof AppVerifyRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/app/identus'
     | '/app/ips'
     | '/app/midnight'
+    | '/app/verify'
     | '/app/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/app/identus'
     | '/app/ips'
     | '/app/midnight'
+    | '/app/verify'
     | '/app'
   id:
     | '__root__'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/app/identus'
     | '/app/ips'
     | '/app/midnight'
+    | '/app/verify'
     | '/app/'
   fileRoutesById: FileRoutesById
 }
@@ -185,6 +197,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppMidnightRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/verify': {
+      id: '/app/verify'
+      path: '/verify'
+      fullPath: '/app/verify'
+      preLoaderRoute: typeof AppVerifyRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -193,6 +212,7 @@ interface AppRouteChildren {
   AppIdentusRoute: typeof AppIdentusRoute
   AppIpsRoute: typeof AppIpsRoute
   AppMidnightRoute: typeof AppMidnightRoute
+  AppVerifyRoute: typeof AppVerifyRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
@@ -201,6 +221,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIdentusRoute: AppIdentusRoute,
   AppIpsRoute: AppIpsRoute,
   AppMidnightRoute: AppMidnightRoute,
+  AppVerifyRoute: AppVerifyRoute,
   AppIndexRoute: AppIndexRoute,
 }
 
