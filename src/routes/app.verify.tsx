@@ -97,13 +97,14 @@ function VerifyWorkspace() {
       const vc = decoded?.["vc"] as { credentialSubject?: Record<string, unknown> } | undefined;
       const subjectDigest = vc?.credentialSubject?.["summaryDigest"];
 
+      const blocking = validation.issues.filter((i) => i.severity === "error").length;
       setChecks([
         {
           label: "Structure conforms to the IPS profile",
-          ok: validation.valid,
-          detail: validation.valid
-            ? `${validation.sections.length} sections recognised.`
-            : `${validation.errors.length} blocking issue(s).`,
+          ok: validation.ok,
+          detail: validation.ok
+            ? `${validation.sections.filter((s) => s.present).length} sections recognised.`
+            : `${blocking} blocking issue(s).`,
         },
         {
           label: "Digest recomputed from canonical JSON",
