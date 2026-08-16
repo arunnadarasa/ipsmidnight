@@ -22,12 +22,13 @@ export const provisionFlyStack = createServerFn({ method: "POST" })
       await supabase.from("fly_deployments").upsert(
         {
           user_id: userId,
+          kind: "midnight",
           app_prefix: data.appPrefix,
           region: data.region,
           status: "error",
           last_error: message,
         },
-        { onConflict: "user_id,app_prefix" },
+        { onConflict: "user_id,app_prefix,kind" },
       );
       throw new Error(message);
     }
@@ -35,6 +36,7 @@ export const provisionFlyStack = createServerFn({ method: "POST" })
     await supabase.from("fly_deployments").upsert(
       {
         user_id: userId,
+        kind: "midnight",
         app_prefix: data.appPrefix,
         region: data.region,
         status: "provisioning",
@@ -45,7 +47,7 @@ export const provisionFlyStack = createServerFn({ method: "POST" })
         node_url: result.nodeUrl,
         machines: result.machines as never,
       },
-      { onConflict: "user_id,app_prefix" },
+      { onConflict: "user_id,app_prefix,kind" },
     );
 
     await supabase.from("activity_log").insert({
@@ -77,6 +79,7 @@ export const checkFlyStack = createServerFn({ method: "POST" })
         machines: machines as never,
       })
       .eq("user_id", context.userId)
+      .eq("kind", "midnight")
       .eq("app_prefix", data.appPrefix);
 
     return { ...urls, machines, probes, ready };
@@ -92,6 +95,7 @@ export const destroyFlyStack = createServerFn({ method: "POST" })
       .from("fly_deployments")
       .delete()
       .eq("user_id", context.userId)
+      .eq("kind", "midnight")
       .eq("app_prefix", data.appPrefix);
     await context.supabase.from("activity_log").insert({
       user_id: context.userId,
@@ -121,6 +125,7 @@ export const verifyAnchor = createServerFn({ method: "POST" })
       .from("fly_deployments")
       .select("indexer_url")
       .eq("user_id", userId)
+      .eq("kind", "midnight")
       .not("indexer_url", "is", null)
       .limit(1)
       .maybeSingle();

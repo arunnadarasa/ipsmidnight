@@ -298,7 +298,8 @@ export const issueHostedCredential = createServerFn({ method: "POST" })
       credential_jwt: jwt,
       state: offer.state,
       simulated: false,
-      metadata: { recordId: offer.recordId, invitationUrl: offer.invitationUrl } as never,
+      record_id: offer.recordId,
+      invitation_url: offer.invitationUrl,
     });
     if (insErr) throw new Error(insErr.message);
 

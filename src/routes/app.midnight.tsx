@@ -56,6 +56,7 @@ function MidnightConsole() {
       const { data, error } = await supabase
         .from("fly_deployments")
         .select("*")
+        .eq("kind", "midnight")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
