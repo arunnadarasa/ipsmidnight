@@ -48,12 +48,12 @@ export function Panel({
   return (
     <section className={cn("panel overflow-hidden", className)}>
       {title ? (
-        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-4 py-3 sm:flex">
+        <header className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-foreground">{title}</h3>
+            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
             {subtitle ? <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p> : null}
           </div>
-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{actions}</div> : null}
         </header>
       ) : null}
       <div className="p-4">{children}</div>
