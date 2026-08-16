@@ -421,9 +421,9 @@ function HalfCard({
   url: string | null;
   urlLabel: string;
   error?: string | null | undefined;
-  readyTo?: string | null;
+  readyTo?: string | null | undefined;
   readyLabel: string;
-  machines?: MachineLike[];
+  machines?: MachineLike[] | undefined;
 }) {
   const tone = ready ? "text-success" : status === "error" ? "text-destructive" : "text-muted-foreground";
   return (
