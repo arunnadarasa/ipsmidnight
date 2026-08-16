@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+/**
+ * Deploy IpsAnchorRegistry to the Fly-hosted Midnight Undeployed stack.
+ *
+ * This is a LOCAL/sandbox Node script on purpose: the serverless runtime has no
+ * long-lived connection to a proof server and cannot host a wallet.
+ *
+ * Prerequisites (one time):
+ *   compact compile contracts/IpsAnchorRegistry.compact contracts/managed/ips-anchor-registry
+ *   bun add @midnight-ntwrk/midnight-js-contracts@4.1.1 \
+ *           @midnight-ntwrk/midnight-js-node-zk-config-provider@4.1.1 \
+ *           @midnight-ntwrk/midnight-js-level-private-state-provider@4.1.1 \
+ *           @midnight-ntwrk/midnight-js-http-client-proof-provider@4.1.1 \
+ *           @midnight-ntwrk/midnight-js-indexer-public-data-provider@4.1.1 \
+ *           @midnight-ntwrk/midnight-js-utils@4.1.1 \
+ *           @midnight-ntwrk/wallet-sdk@1.2.0 @midnight-ntwrk/testkit-js@4.1.1 \
+ *           @midnight-ntwrk/zswap@4.0.0 ws
+ *
+ * Usage:
+ *   bun scripts/deploy-midnight.mjs --indexer https://<app>.fly.dev/api/v4/graphql \
+ *                                   --proof   https://<app>.fly.dev:6300
+ */
+import { writeFileSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import WebSocket from "ws";
+
+globalThis.WebSocket = WebSocket;
+
+const require = createRequire(import.meta.url);
+const args = Object.fromEntries(
+  process.argv.slice(2).flatMap((a, i, all) => (a.startsWith("--") ? [[a.slice(2), all[i + 1]]] : [])),
+);
+
+const INDEXER = args.indexer ?? process.env.VITE_INDEXER_URL;
+const PROOF = args.proof ?? process.env.VITE_PROOF_SERVER_URL;
+if (!INDEXER || !PROOF) {
+  console.error("Missing --indexer and/or --proof (or VITE_INDEXER_URL / VITE_PROOF_SERVER_URL).");
+  process.exit(1);
+}
+const INDEXER_WS = INDEXER.replace(/^http/, "ws") + "/ws";
+
+// Shared with the app so private state survives redeploys — never randomise these.
+const GENESIS_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
+const PRIVATE_STATE_ID = "ips-anchor-registry";
+const PRIVATE_STATE_STORE = "ips-midnight-level-db";
+const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-2026";
+const DEPLOYER_SECRET_HEX = "11".repeat(32);
+
+const CONTRACT_DIR = "contracts/managed/ips-anchor-registry";
+if (!existsSync(`${CONTRACT_DIR}/contract/index.js`) && !existsSync(`${CONTRACT_DIR}/contract/index.cjs`)) {
+  console.error(`Compile first: compact compile contracts/IpsAnchorRegistry.compact ${CONTRACT_DIR}`);
+  process.exit(1);
+}
+
+async function waitForStack() {
+  for (let i = 0; i < 60; i += 1) {
+    const [indexerOk, proofOk] = await Promise.all([
+      fetch(INDEXER, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "query { block { height } }" }),
+      })
+        .then((r) => r.ok)
+        .catch(() => false),
+      fetch(`${PROOF}/health`).then((r) => r.ok).catch(() => false),
+    ]);
+    if (indexerOk && proofOk) return;
+    console.log(`waiting for stack… indexer=${indexerOk} proof=${proofOk}`);
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  throw new Error("Stack never became ready — check the Fly machines.");
+}
+
+async function main() {
+  await waitForStack();
+
+  const { setNetworkId } = require("@midnight-ntwrk/midnight-js-network-id");
+  setNetworkId("undeployed");
+
+  const { deployContract } = require("@midnight-ntwrk/midnight-js-contracts");
+  const { NodeZkConfigProvider } = require("@midnight-ntwrk/midnight-js-node-zk-config-provider");
+  const { levelPrivateStateProvider } = require("@midnight-ntwrk/midnight-js-level-private-state-provider");
+  const { httpClientProofProvider } = require("@midnight-ntwrk/midnight-js-http-client-proof-provider");
+  const { indexerPublicDataProvider } = require("@midnight-ntwrk/midnight-js-indexer-public-data-provider");
+  const { MidnightWalletProvider } = require("@midnight-ntwrk/testkit-js");
+  const { NetworkId } = require("@midnight-ntwrk/wallet-sdk");
+
+  const contractModule = existsSync(`${CONTRACT_DIR}/contract/index.js`)
+    ? await import(`../${CONTRACT_DIR}/contract/index.js`)
+    : require(`../${CONTRACT_DIR}/contract/index.cjs`);
+  const Contract = contractModule.Contract ?? contractModule.default?.Contract;
+
+  const wallet = await MidnightWalletProvider.build({
+    seed: GENESIS_SEED,
+    networkId: NetworkId.NetworkId.Undeployed,
+    indexer: INDEXER,
+    indexerWS: INDEXER_WS,
+    proofServer: PROOF,
+    node: INDEXER.replace(/\/api\/v4\/graphql$/, ""),
+  });
+
+  const providers = {
+    privateStateProvider: levelPrivateStateProvider({
+      privateStateStoreName: PRIVATE_STATE_STORE,
+      accountId: PRIVATE_STATE_ID,
+      passwordProvider: () => PRIVATE_STORAGE_PASSWORD,
+    }),
+    zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
+    proofProvider: httpClientProofProvider(PROOF),
+    publicDataProvider: indexerPublicDataProvider(INDEXER, INDEXER_WS),
+    walletProvider: wallet,
+    midnightProvider: wallet,
+  };
+
+  const witnesses = {
+    localSecretKey: () => [{}, Uint8Array.from(Buffer.from(DEPLOYER_SECRET_HEX, "hex"))],
+  };
+
+  console.log("deploying IpsAnchorRegistry (first proof can take 30–120s)…");
+  const deployed = await deployContract(providers, {
+    privateStateId: PRIVATE_STATE_ID,
+    contract: new Contract(witnesses),
+    initialPrivateState: {},
+  });
+
+  const address = deployed.deployTxData.public.contractAddress;
+  const deployTx = deployed.deployTxData.public.txId ?? null;
+
+  writeFileSync(
+    "src/data/midnight-contract.undeployed.json",
+    `${JSON.stringify(
+      {
+        address,
+        deployTx,
+        network: "undeployed",
+        privateStateId: PRIVATE_STATE_ID,
+        circuit: "anchorSummary",
+        compactVersion: "0.23",
+        deployedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  console.log(`DEPLOY_OK address=${address} tx=${deployTx}`);
+  await wallet.close?.();
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
