@@ -420,7 +420,7 @@ function HalfCard({
   loading: boolean;
   url: string | null;
   urlLabel: string;
-  error?: string | null;
+  error?: string | null | undefined;
   readyTo?: string | null;
   readyLabel: string;
   machines?: MachineLike[];
