@@ -107,9 +107,10 @@ export function BundleBuilder({ state, onChange }: Props) {
           <div className="space-y-1.5">
             <Label>Gender</Label>
             <Select
-              value={state.patient.gender || undefined}
+              {...(state.patient.gender ? { value: state.patient.gender } : {})}
               onValueChange={(v) => setPatient("gender", v)}
             >
+
               <SelectTrigger>
                 <SelectValue placeholder="Select" />
               </SelectTrigger>
