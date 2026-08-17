@@ -490,7 +490,7 @@ export const repairMidnightOnly = createServerFn({ method: "POST" })
     await supabase.from("activity_log").insert({
       user_id: userId,
       kind: "stack.repaired",
-      summary: `Repaired Midnight stack for ${data.appPrefix} (indexer → node RPC over flycast)`,
+      summary: `Repaired Midnight stack for ${data.appPrefix} (indexer → node RPC over the Fly edge)`,
       metadata: { appPrefix: data.appPrefix, scope: "midnight" } as never,
     });
 
