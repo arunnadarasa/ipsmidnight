@@ -9,6 +9,7 @@ A clinical console for the **International Patient Summary (IPS)** that joins th
 All Docker infrastructure for 2 and 3 is provisioned **from inside the app** onto **Fly.io** Machines — no local Docker, no `docker compose`, no CI.
 
 **Live app**: https://ipsmidnight.lovable.app
+**Source**: https://github.com/arunnadarasa/ipsmidnight
 
 ---
 
@@ -228,8 +229,8 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 Requirements: Node.js (or Bun) and a Fly.io organisation token.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
+git clone https://github.com/arunnadarasa/ipsmidnight.git
+cd ipsmidnight
 npm i
 npm run dev        # http://localhost:8080
 ```
@@ -266,6 +267,9 @@ Scripts: `npm run dev`, `npm run build`, `npm run lint`, `npm run format`.
 - https://build.fhir.org/ig/HL7/CDA-IPS/fp-db11d3be-6643-471a-91d3-be6643e71a7a.html
 - https://github.com/NHSDigital/NHSEngland-FHIR-SCR-IPS
 
+### This project
+- https://github.com/arunnadarasa/ipsmidnight (this repository)
+
 ### Midnight
 - https://docs.midnight.network/llms-full.txt
 - https://docs.midnight.network/relnotes/network (network endpoints)
@@ -281,4 +285,4 @@ This repository started from a single prompt: *"Create an app for International 
 
 ---
 
-Built with [Lovable](https://lovable.dev) — continue in the [editor](https://lovable.dev/projects/9101c7d8-5a00-410e-8d44-dd50ade8c6e7). Changes in Lovable commit straight to this repository, and pushes to `main` sync back.
+Built with [Lovable](https://lovable.dev) — continue in the [editor](https://lovable.dev/projects/9101c7d8-5a00-410e-8d44-dd50ade8c6e7). The source lives on GitHub at [arunnadarasa/ipsmidnight](https://github.com/arunnadarasa/ipsmidnight). Changes in Lovable commit straight to this repository, and pushes to `main` sync back.
