@@ -49,7 +49,7 @@ export const provisionFullStack = createServerFn({ method: "POST" })
     let midnightResult: { ok: true; result: Awaited<ReturnType<typeof provisionStack>> } | { ok: false; error: string };
     try {
       const result = await provisionStack({ appPrefix: data.appPrefix, region: data.region, ...(data.orgSlug ? { orgSlug: data.orgSlug } : {}) });
-      await supabase.from("fly_deployments").upsert(
+      const saved = await supabase.from("fly_deployments").upsert(
         {
           user_id: userId,
           kind: "midnight",
@@ -65,7 +65,9 @@ export const provisionFullStack = createServerFn({ method: "POST" })
         },
         { onConflict: "user_id,app_prefix,kind" },
       );
+      if (saved.error) throw new Error(`Could not save the Midnight deployment record: ${saved.error.message}`);
       midnightResult = { ok: true, result };
+
     } catch (err) {
       const message = err instanceof Error ? err.message : "Midnight provisioning failed";
       await supabase.from("fly_deployments").upsert(
