@@ -54,7 +54,7 @@ export function stackUrls(appName: string): StackUrls {
     proofUrl: `https://${host}:6300`,
     // The node's RPC is 6PN-internal only (no public port) — reachable from
     // other Fly apps and from a one-shot deploy machine on the same network.
-    nodeUrl: `ws://midnight-node.process.${appName}.internal:9944`,
+    nodeUrl: nodeRpcWsUrl(appName),
   };
 }
 
