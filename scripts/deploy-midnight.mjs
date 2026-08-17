@@ -43,7 +43,8 @@ const INDEXER_WS = INDEXER.replace(/^http/, "ws") + "/ws";
 const GENESIS_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
 const PRIVATE_STATE_ID = "ips-anchor-registry";
 const PRIVATE_STATE_STORE = "ips-midnight-level-db";
-const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-2026";
+// midnight-js-utils enforces >= 16 characters and mixed character classes.
+const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-Registry-2026";
 const DEPLOYER_SECRET_HEX = "11".repeat(32);
 
 // The Midnight JS SDK is ESM-only and heavy; it is installed in a scratch
@@ -121,14 +122,18 @@ async function main() {
   const wallet = await MidnightWalletProvider.build(log, env, GENESIS_SEED);
   await wallet.start(true);
 
+  // The proof server needs the circuit's IR alongside the preimage; without
+  // the zkConfigProvider argument /check answers 400 Bad Request.
+  const zkConfigProvider = new NodeZkConfigProvider(CONTRACT_DIR);
+
   const providers = {
     privateStateProvider: levelPrivateStateProvider({
       privateStateStoreName: PRIVATE_STATE_STORE,
       accountId: PRIVATE_STATE_ID,
       privateStoragePasswordProvider: () => PRIVATE_STORAGE_PASSWORD,
     }),
-    zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
-    proofProvider: httpClientProofProvider(PROOF),
+    zkConfigProvider,
+    proofProvider: httpClientProofProvider(PROOF, zkConfigProvider),
     publicDataProvider: indexerPublicDataProvider(INDEXER, INDEXER_WS),
     walletProvider: wallet,
     midnightProvider: wallet,

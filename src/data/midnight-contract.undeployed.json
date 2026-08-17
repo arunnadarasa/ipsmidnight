@@ -1,9 +1,9 @@
 {
-  "address": "0000000000000000000000000000000000000000000000000000000000000000",
-  "deployTx": null,
+  "address": "b5ecda373de3cef68f685193b402a534b0b05d1923c90b2826c42248fef5a2e2",
+  "deployTx": "0048bf671eddfe96e9e50e914f5a1c354a0adeca7943671755457eb43cd4ced857",
   "network": "undeployed",
   "privateStateId": "ips-anchor-registry",
   "circuit": "anchorSummary",
   "compactVersion": "0.23",
-  "deployedAt": null
+  "deployedAt": "2026-08-17T09:13:20.744Z"
 }
