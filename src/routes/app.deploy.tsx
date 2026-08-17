@@ -24,7 +24,7 @@ import {
   destroyFullStack,
   repairFullStack,
   repairIdentusOnly,
-
+  reconnectStack,
   listStacks,
 } from "@/lib/stack.functions";
 import { StackTimeline } from "@/components/deploy/StackTimeline";
