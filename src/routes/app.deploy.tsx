@@ -130,6 +130,21 @@ function DeployConsole() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Provisioning failed"),
   });
 
+  const repairMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return repair({ data: { appPrefix: selected.appPrefix, region: selected.region } });
+    },
+    onSuccess: (res) => {
+      const failed = [!res.identus.ok ? "Identus" : null, !res.midnight.ok ? "Midnight" : null].filter(Boolean);
+      if (failed.length) toast.warning(`Repair partially applied — ${failed.join(" and ")} failed.`);
+      else toast.success("Stack config re-applied — machines restarting.");
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Repair failed"),
+  });
+
   const destroyMut = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("No stack selected");
