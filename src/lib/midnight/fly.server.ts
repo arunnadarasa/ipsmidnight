@@ -63,10 +63,14 @@ async function ensureApp(appName: string, orgSlug: string) {
   return true;
 }
 
-/** Public IPs are allocated through the GraphQL API, not the Machines API. */
+/**
+ * Public IPs are allocated through the GraphQL API, not the Machines API.
+ * The `private` allocation is what makes `<app>.flycast` resolve — without it
+ * the indexer cannot reach the node's RPC through the Fly proxy.
+ */
 async function allocateIps(appName: string) {
   const mutation = `mutation($input: AllocateIPAddressInput!) { allocateIpAddress(input: $input) { ipAddress { address type } } }`;
-  for (const type of ["shared_v4", "v6"] as const) {
+  for (const type of ["shared_v4", "v6", "private"] as const) {
     const res = await fetch("https://api.fly.io/graphql", {
       method: "POST",
       headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
@@ -76,6 +80,7 @@ async function allocateIps(appName: string) {
     await res.text();
   }
 }
+
 
 function machineConfig(
   kind: "node" | "indexer" | "proof",
@@ -102,15 +107,19 @@ function machineConfig(
         // Chain data survives restarts and repairs, so a deployed contract
         // address stays valid.
         ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
-        // 9944 stays private to the 6PN network; the indexer is the public surface.
+        // 9944 is never published publicly, but it MUST be declared as a service
+        // so the Fly proxy accepts private (flycast) traffic on that port and
+        // forwards it to the container over IPv4 — the only way the indexer can
+        // reach an IPv4-bound Substrate RPC on Fly's IPv6-only 6PN network.
         services: [
           {
-            ports: [],
+            ports: [{ port: 9944, handlers: [] }],
             protocol: "tcp",
             internal_port: 9944,
             autostop: false,
           },
         ],
+
         restart: { policy: "always" },
       },
     };
@@ -220,8 +229,11 @@ async function ensureMachine(
 
 /** Re-applies corrected specs to an existing app and restarts each machine. */
 export async function repairMidnightStack(appName: string, region: string) {
+  // Older stacks have no private IP, so `<app>.flycast` does not resolve yet.
+  await allocateIps(appName);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
+
   for (const kind of ["node", "indexer", "proof"] as const) {
     const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
     const spec = machineConfig(kind, appName, volumeId);
@@ -334,14 +346,21 @@ async function probeIndexer(url: string): Promise<{ probe: ProbeResult; blockHei
     });
     const json = (await res.json()) as { data?: { block?: { height?: number } }; errors?: unknown };
     const height = json.data?.block?.height ?? null;
+    // An indexer that answers GraphQL but has ingested no block is NOT ready:
+    // reporting it as ok made the whole stack look healthy while nothing could
+    // be deployed or anchored against an empty chain.
     return {
       probe: {
-        ok: res.ok && !json.errors,
+        ok: res.ok && !json.errors && height !== null,
         status: res.status,
-        detail: height === null ? "reachable, no block yet" : `block #${height}`,
+        detail:
+          height === null
+            ? "GraphQL up, no blocks ingested — the indexer cannot reach the node's RPC"
+            : `block #${height}`,
       },
       blockHeight: height,
     };
+
   } catch (err) {
     return {
       probe: { ok: false, status: null, detail: err instanceof Error ? err.message : "unreachable" },

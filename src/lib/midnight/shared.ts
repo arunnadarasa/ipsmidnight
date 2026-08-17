@@ -23,10 +23,19 @@ export const INDEXER_ENV = {
   APP__INFRA__API__ADDRESS: "::",
 } as const;
 
-/** 6PN address of the node's RPC — used by both indexer node URLs. */
+/**
+ * Private address of the node's RPC, used by both indexer node URLs.
+ *
+ * NOT the 6PN `<group>.process.<app>.internal` name: that resolves to IPv6 only,
+ * and the node's RPC listener binds IPv4 (upstream publishes 9944 through Docker
+ * port mapping), so an IPv6 connect is refused and the indexer silently serves
+ * an empty chain. `<app>.flycast` goes through the Fly proxy, which reaches the
+ * container over IPv4 — so the indexer connects regardless of the node's bind.
+ */
 export function nodeRpcWsUrl(appName: string) {
-  return `ws://midnight-node.process.${appName}.internal:9944`;
+  return `ws://${appName}.flycast:9944`;
 }
+
 
 
 export const FLY_REGIONS = [

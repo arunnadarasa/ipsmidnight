@@ -24,6 +24,8 @@ import {
   destroyFullStack,
   repairFullStack,
   repairIdentusOnly,
+  repairMidnightOnly,
+
   reconnectStack,
   listStacks,
 } from "@/lib/stack.functions";
@@ -87,6 +89,8 @@ function DeployConsole() {
   const destroy = useServerFn(destroyFullStack);
   const repair = useServerFn(repairFullStack);
   const repairIdentus = useServerFn(repairIdentusOnly);
+  const repairMidnight = useServerFn(repairMidnightOnly);
+
   const reconnect = useServerFn(reconnectStack);
 
 
@@ -167,6 +171,20 @@ function DeployConsole() {
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Identus repair failed"),
   });
+
+  const repairMidnightMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return repairMidnight({ data: { appPrefix: selected.appPrefix, region: selected.region } });
+    },
+    onSuccess: () => {
+      toast.success("Midnight machines re-applied — the indexer is reconnecting to the node RPC.");
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Midnight repair failed"),
+  });
+
 
   const reconnectMut = useMutation({
     mutationFn: async () => {
@@ -252,6 +270,9 @@ function DeployConsole() {
               repairLoading={repairMut.isPending}
               onRepairIdentus={() => repairIdentusMut.mutate()}
               repairIdentusLoading={repairIdentusMut.isPending}
+              onRepairMidnight={() => repairMidnightMut.mutate()}
+              repairMidnightLoading={repairMidnightMut.isPending}
+
               onReconnect={() => reconnectMut.mutate()}
               reconnectLoading={reconnectMut.isPending}
 
@@ -383,6 +404,9 @@ function StackDetail({
   repairLoading,
   onRepairIdentus,
   repairIdentusLoading,
+  onRepairMidnight,
+  repairMidnightLoading,
+
   onReconnect,
   reconnectLoading,
 }: {
@@ -397,6 +421,9 @@ function StackDetail({
   repairLoading: boolean;
   onRepairIdentus: () => void;
   repairIdentusLoading: boolean;
+  onRepairMidnight: () => void;
+  repairMidnightLoading: boolean;
+
   onReconnect: () => void;
   reconnectLoading: boolean;
 
@@ -432,6 +459,15 @@ function StackDetail({
             )}
             Fix agent DB
           </Button>
+          <Button variant="outline" size="sm" onClick={onRepairMidnight} disabled={repairMidnightLoading}>
+            {repairMidnightLoading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wrench className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Fix indexer
+          </Button>
+
           <Button variant="outline" size="sm" onClick={onReconnect} disabled={reconnectLoading}>
             {reconnectLoading ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
