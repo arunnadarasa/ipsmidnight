@@ -117,13 +117,13 @@ function machineConfig(
         // Chain data survives restarts and repairs, so a deployed contract
         // address stays valid.
         ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
-        // 9944 is never published publicly, but it MUST be declared as a service
-        // so the Fly proxy accepts private (flycast) traffic on that port and
-        // forwards it to the container over IPv4 — the only way the indexer can
-        // reach an IPv4-bound Substrate RPC on Fly's IPv6-only 6PN network.
+        // The RPC is published through the Fly edge on 9944 (tls + http, so the
+        // WebSocket upgrade passes through). The edge reaches the container over
+        // IPv4, which is the only thing the IPv4-bound Substrate RPC accepts —
+        // and unlike flycast it needs no private-IP allocation to work.
         services: [
           {
-            ports: [{ port: 9944, handlers: [] }],
+            ports: [{ port: 9944, handlers: ["tls", "http"] }],
             protocol: "tcp",
             internal_port: 9944,
             autostop: false,
