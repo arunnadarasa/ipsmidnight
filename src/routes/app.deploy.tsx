@@ -89,6 +89,8 @@ function DeployConsole() {
   const destroy = useServerFn(destroyFullStack);
   const repair = useServerFn(repairFullStack);
   const repairIdentus = useServerFn(repairIdentusOnly);
+  const repairMidnight = useServerFn(repairMidnightOnly);
+
   const reconnect = useServerFn(reconnectStack);
 
 
