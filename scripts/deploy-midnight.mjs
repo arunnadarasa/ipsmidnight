@@ -125,7 +125,7 @@ async function main() {
     privateStateProvider: levelPrivateStateProvider({
       privateStateStoreName: PRIVATE_STATE_STORE,
       accountId: PRIVATE_STATE_ID,
-      passwordProvider: () => PRIVATE_STORAGE_PASSWORD,
+      privateStoragePasswordProvider: () => PRIVATE_STORAGE_PASSWORD,
     }),
     zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
     proofProvider: httpClientProofProvider(PROOF),
