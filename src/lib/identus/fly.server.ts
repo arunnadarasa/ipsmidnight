@@ -309,8 +309,10 @@ export async function identusMachineStates(appName: string) {
     state: m.state,
     region: m.region ?? null,
     checks: (m.checks ?? []).map((c) => ({ name: c.name, status: c.status, output: (c.output ?? "").slice(0, 300) })),
+    ...exitSummary(m),
   }));
 }
+
 
 export async function identusDiagnostics(appName: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
