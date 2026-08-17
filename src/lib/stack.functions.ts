@@ -49,7 +49,7 @@ export const provisionFullStack = createServerFn({ method: "POST" })
     let midnightResult: { ok: true; result: Awaited<ReturnType<typeof provisionStack>> } | { ok: false; error: string };
     try {
       const result = await provisionStack({ appPrefix: data.appPrefix, region: data.region, ...(data.orgSlug ? { orgSlug: data.orgSlug } : {}) });
-      await supabase.from("fly_deployments").upsert(
+      const saved = await supabase.from("fly_deployments").upsert(
         {
           user_id: userId,
           kind: "midnight",
@@ -65,7 +65,9 @@ export const provisionFullStack = createServerFn({ method: "POST" })
         },
         { onConflict: "user_id,app_prefix,kind" },
       );
+      if (saved.error) throw new Error(`Could not save the Midnight deployment record: ${saved.error.message}`);
       midnightResult = { ok: true, result };
+
     } catch (err) {
       const message = err instanceof Error ? err.message : "Midnight provisioning failed";
       await supabase.from("fly_deployments").upsert(
@@ -166,11 +168,15 @@ export const checkFullStack = createServerFn({ method: "POST" })
         status: identusStatus,
         ready: identusHealth.ready,
         logTail: identusLog,
+        // Without a stored admin key the probes cannot run at all — the UI needs
+        // to say "reconnect" rather than show a spinner that never resolves.
+        hasKey: Boolean(conn?.api_key),
       },
       midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady },
       allReady: identusHealth.ready && midnightReady,
       appPrefix: data.appPrefix,
     };
+
   });
 
 /** Tears down both halves of an IPS stack. 404s on Fly are treated as already-gone. */
@@ -320,6 +326,70 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
 
     return { ok: true };
   });
+
+/**
+
+ * Adopts a stack whose Fly machines are running but whose console records are
+ * missing (an earlier provision saved the machines but not the admin key). Mints
+ * a fresh admin key onto the running cloud agent, writes the deployment and
+ * agent-connection rows, and provisions the Midnight half if it is absent.
+ */
+export const reconnectStack = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; region?: string }) => input)
+  .handler(async ({ data, context }) => {
+    const { reconnectIdentusAgent, recordIdentusDeployment } = await import("@/lib/identus/fly.server");
+    const { provisionStack, machineStates } = await import("@/lib/midnight/fly.server");
+    const { supabase, userId } = context;
+
+    const { data: rows } = await supabase
+      .from("fly_deployments")
+      .select("region")
+      .eq("user_id", userId)
+      .eq("app_prefix", data.appPrefix);
+    const region = data.region ?? rows?.[0]?.region ?? "lhr";
+
+    const identus = await reconnectIdentusAgent({ appPrefix: data.appPrefix, region });
+    await recordIdentusDeployment(supabase, userId, { appPrefix: data.appPrefix, region }, identus);
+
+    // Midnight is only (re)provisioned when its app has no machines at all.
+    const existing = await machineStates(`${data.appPrefix}-midnight`).catch(() => []);
+    let midnight: { ok: boolean; error?: string } = { ok: true };
+    if (existing.length === 0) {
+      try {
+        const result = await provisionStack({ appPrefix: data.appPrefix, region });
+        const saved = await supabase.from("fly_deployments").upsert(
+          {
+            user_id: userId,
+            kind: "midnight",
+            app_prefix: data.appPrefix,
+            region,
+            status: "provisioning",
+            last_error: null,
+            indexer_url: result.indexerUrl,
+            indexer_ws_url: result.indexerWsUrl,
+            proof_url: result.proofUrl,
+            node_url: result.nodeUrl,
+            machines: result.machines as never,
+          },
+          { onConflict: "user_id,app_prefix,kind" },
+        );
+        if (saved.error) throw new Error(saved.error.message);
+      } catch (err) {
+        midnight = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    await supabase.from("activity_log").insert({
+      user_id: userId,
+      kind: "stack.reconnected",
+      summary: `Reconnected stack ${data.appPrefix} (new agent admin key stored)`,
+      metadata: { appPrefix: data.appPrefix, midnight } as never,
+    });
+
+    return { ok: true, midnight };
+  });
+
 
 
 

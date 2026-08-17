@@ -24,7 +24,7 @@ import {
   destroyFullStack,
   repairFullStack,
   repairIdentusOnly,
-
+  reconnectStack,
   listStacks,
 } from "@/lib/stack.functions";
 import { StackTimeline } from "@/components/deploy/StackTimeline";
@@ -40,6 +40,7 @@ type ReadinessResult = {
     status: string;
     ready: boolean;
     logTail?: string | null;
+    hasKey?: boolean;
   };
   midnight: {
     urls: { appName: string; indexerUrl: string; indexerWsUrl: string; proofUrl: string; nodeUrl: string };
@@ -86,6 +87,8 @@ function DeployConsole() {
   const destroy = useServerFn(destroyFullStack);
   const repair = useServerFn(repairFullStack);
   const repairIdentus = useServerFn(repairIdentusOnly);
+  const reconnect = useServerFn(reconnectStack);
+
 
 
   const [prefix, setPrefix] = useState("");
@@ -165,6 +168,20 @@ function DeployConsole() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Identus repair failed"),
   });
 
+  const reconnectMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return reconnect({ data: { appPrefix: selected.appPrefix, region: selected.region } });
+    },
+    onSuccess: (res) => {
+      if (res.midnight.ok) toast.success("Stack reconnected — a new agent admin key is stored.");
+      else toast.warning(`Agent reconnected, but Midnight failed: ${res.midnight.error}`);
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Reconnect failed"),
+  });
+
 
   const destroyMut = useMutation({
     mutationFn: async () => {
@@ -235,6 +252,8 @@ function DeployConsole() {
               repairLoading={repairMut.isPending}
               onRepairIdentus={() => repairIdentusMut.mutate()}
               repairIdentusLoading={repairIdentusMut.isPending}
+              onReconnect={() => reconnectMut.mutate()}
+              reconnectLoading={reconnectMut.isPending}
 
             />
           ) : null}
@@ -364,6 +383,8 @@ function StackDetail({
   repairLoading,
   onRepairIdentus,
   repairIdentusLoading,
+  onReconnect,
+  reconnectLoading,
 }: {
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
@@ -376,6 +397,8 @@ function StackDetail({
   repairLoading: boolean;
   onRepairIdentus: () => void;
   repairIdentusLoading: boolean;
+  onReconnect: () => void;
+  reconnectLoading: boolean;
 
 }) {
   const identus = readiness?.identus;
@@ -409,6 +432,14 @@ function StackDetail({
             )}
             Fix agent DB
           </Button>
+          <Button variant="outline" size="sm" onClick={onReconnect} disabled={reconnectLoading}>
+            {reconnectLoading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wrench className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Reconnect
+          </Button>
 
           <Button variant="ghost" size="sm" onClick={onDestroy} disabled={destroyLoading} className="text-destructive hover:text-destructive">
             {destroyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
@@ -436,6 +467,7 @@ function StackDetail({
             machines: identus?.machines,
             probes: identus?.health.probes,
             logTail: identus?.logTail ?? null,
+            hasKey: identus?.hasKey ?? true,
           })}
           startedAt={stack.created_at}
           regionLabel={`Region ${stack.region}`}

@@ -512,7 +512,7 @@ export async function recordIdentusDeployment(
   input: { appPrefix: string; region: string; label?: string },
   result: IdentusProvisionResult,
 ) {
-  await supabase.from("fly_deployments").upsert(
+  const deployment = await supabase.from("fly_deployments").upsert(
     {
       user_id: userId,
       kind: "identus",
@@ -526,9 +526,12 @@ export async function recordIdentusDeployment(
     },
     { onConflict: "user_id,app_prefix,kind" },
   );
+  // A silently dropped write leaves the console with no admin key, which shows up
+  // later as health probes that spin forever — so fail loudly here instead.
+  if (deployment.error) throw new Error(`Could not save the Identus deployment record: ${deployment.error.message}`);
 
   await supabase.from("agent_connections").update({ is_active: false }).eq("user_id", userId);
-  await supabase.from("agent_connections").upsert(
+  const connection = await supabase.from("agent_connections").upsert(
     {
       user_id: userId,
       label: input.label?.trim() || `Fly agent ${result.appName}`,
@@ -542,9 +545,35 @@ export async function recordIdentusDeployment(
       last_error: null,
       metadata: { appName: result.appName } as never,
     },
-    { onConflict: "user_id, app_prefix" },
+    { onConflict: "user_id,app_prefix" },
   );
+  if (connection.error) throw new Error(`Could not save the agent connection: ${connection.error.message}`);
 }
+
+/**
+ * Adopts an already-running agent whose admin key was never stored: mints a new
+ * key, pushes it into the cloud-agent machine env and restarts only that machine.
+ * The agent's own data is untouched, so previously published DIDs survive.
+ */
+export async function reconnectIdentusAgent(input: {
+  appPrefix: string;
+  region: string;
+}): Promise<IdentusProvisionResult> {
+  const appName = `${input.appPrefix}-identus`;
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const agent = machines.find((m) => m.name === "identus-cloud-agent");
+  if (!agent) throw new Error(`No cloud agent found on ${appName} — provision the stack first.`);
+  const adminKey = mintAdminKey();
+  await repairAgentEndpoints(appName, adminKey, input.region);
+  const after = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? machines;
+  return {
+    ...identusStackUrls(appName),
+    created: false,
+    adminKey,
+    machines: after.map((m) => ({ name: m.name, id: m.id, state: m.state })),
+  };
+}
+
 
 /** Rewrites DIDCOMM_SERVICE_URL and republishes port 8090 without a full redeploy. */
 export async function repairAgentEndpoints(appName: string, adminKey: string, region: string) {
