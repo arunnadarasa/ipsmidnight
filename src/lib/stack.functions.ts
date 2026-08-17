@@ -323,7 +323,12 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
       summary: `Repaired Identus agent for ${data.appPrefix} (database app roles recreated)`,
       metadata: { appPrefix: data.appPrefix, scope: "identus" } as never,
     });
+
+    return { ok: true };
+  });
+
 /**
+
  * Adopts a stack whose Fly machines are running but whose console records are
  * missing (an earlier provision saved the machines but not the admin key). Mints
  * a fresh admin key onto the running cloud agent, writes the deployment and
