@@ -139,13 +139,14 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         },
         files: [{ guest_path: "/docker-entrypoint-initdb.d/00-init.sql", raw_value: b64(POSTGRES_INIT_SQL) }],
         guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
-        services: [
-          { ports: [], protocol: "tcp", internal_port: 5432, autostop: false },
-        ],
+        // Postgres is reached over 6PN only — declaring a service here is what
+        // makes Fly treat the machine as a public web service and can stop the
+        // private DNS record from being what the JVM expects.
         restart: { policy: "always" },
       },
     };
   }
+
 
   if (kind === "prism-node") {
     return {
