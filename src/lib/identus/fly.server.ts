@@ -11,6 +11,8 @@ import {
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
+type FlyExitEvent = { exit_code?: number | null; oom_killed?: boolean | null };
+
 type FlyMachine = {
   id: string;
   name: string;
@@ -18,9 +20,31 @@ type FlyMachine = {
   region?: string;
   config?: { env?: Record<string, string>; services?: { internal_port: number }[] };
   checks?: { name: string; status: string; output?: string }[];
+  events?: FlyEvent[];
 };
 
-type FlyEvent = { type: string; status: string; timestamp: number; request?: unknown };
+type FlyEvent = {
+  type: string;
+  status: string;
+  timestamp: number;
+  request?: { exit_event?: FlyExitEvent | null } | null;
+};
+
+/** Crash-looping machines flip back to `started`; the exit events are the truth. */
+function exitSummary(m: FlyMachine) {
+  const exits = (m.events ?? []).filter((e) => e.request?.exit_event);
+  const last = exits[0]?.request?.exit_event ?? null;
+  const exitCode = typeof last?.exit_code === "number" ? last.exit_code : null;
+  const oomKilled = Boolean(last?.oom_killed);
+  const restarts = exits.length;
+  const detail = oomKilled
+    ? `${m.name} was killed for running out of memory (restarted ${restarts}×).`
+    : exitCode !== null && exitCode !== 0
+      ? `${m.name} exited with code ${exitCode} and is restarting (${restarts} exits recorded).`
+      : null;
+  return { exitCode, oomKilled, restarts, detail };
+}
+
 
 function token() {
   const t = process.env["FLY_API_TOKEN"];
