@@ -23,6 +23,8 @@ import {
   checkFullStack,
   destroyFullStack,
   repairFullStack,
+  repairIdentusOnly,
+
   listStacks,
 } from "@/lib/stack.functions";
 import { StackTimeline } from "@/components/deploy/StackTimeline";
@@ -83,6 +85,8 @@ function DeployConsole() {
   const check = useServerFn(checkFullStack);
   const destroy = useServerFn(destroyFullStack);
   const repair = useServerFn(repairFullStack);
+  const repairIdentus = useServerFn(repairIdentusOnly);
+
 
   const [prefix, setPrefix] = useState("");
   const [label, setLabel] = useState("");
@@ -147,6 +151,20 @@ function DeployConsole() {
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Repair failed"),
   });
+
+  const repairIdentusMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return repairIdentus({ data: { appPrefix: selected.appPrefix, region: selected.region } });
+    },
+    onSuccess: () => {
+      toast.success("Identus database recreated — the agent is rebooting. Midnight untouched.");
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Identus repair failed"),
+  });
+
 
   const destroyMut = useMutation({
     mutationFn: async () => {
@@ -215,6 +233,9 @@ function DeployConsole() {
               destroyLoading={destroyMut.isPending}
               onRepair={() => repairMut.mutate()}
               repairLoading={repairMut.isPending}
+              onRepairIdentus={() => repairIdentusMut.mutate()}
+              repairIdentusLoading={repairIdentusMut.isPending}
+
             />
           ) : null}
 
@@ -341,6 +362,8 @@ function StackDetail({
   destroyLoading,
   onRepair,
   repairLoading,
+  onRepairIdentus,
+  repairIdentusLoading,
 }: {
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
@@ -351,6 +374,9 @@ function StackDetail({
   destroyLoading: boolean;
   onRepair: () => void;
   repairLoading: boolean;
+  onRepairIdentus: () => void;
+  repairIdentusLoading: boolean;
+
 }) {
   const identus = readiness?.identus;
   const midnight = readiness?.midnight;
@@ -375,6 +401,15 @@ function StackDetail({
             {repairLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wrench className="mr-1.5 h-3.5 w-3.5" />}
             Repair config
           </Button>
+          <Button variant="outline" size="sm" onClick={onRepairIdentus} disabled={repairIdentusLoading}>
+            {repairIdentusLoading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wrench className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Fix agent DB
+          </Button>
+
           <Button variant="ghost" size="sm" onClick={onDestroy} disabled={destroyLoading} className="text-destructive hover:text-destructive">
             {destroyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
             Destroy both
