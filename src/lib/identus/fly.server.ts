@@ -191,6 +191,13 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         AGENT_DB_NAME: "agent",
         AGENT_DB_USER: IDENTUS_DB.user,
         AGENT_DB_PASSWORD: IDENTUS_DB.password,
+        // The agent's own Flyway/secret-storage layer reads the plain POSTGRES_*
+        // group; without it, secret storage initialisation fails on boot.
+        POSTGRES_HOST: pgHost,
+        POSTGRES_PORT: "5432",
+        POSTGRES_DB: "agent",
+        POSTGRES_USER: IDENTUS_DB.user,
+        POSTGRES_PASSWORD: IDENTUS_DB.password,
         PRISM_NODE_HOST: `identus-prism-node.process.${appName}.internal`,
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
@@ -204,7 +211,10 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         DIDCOMM_SERVICE_URL: urls.didcommUrl,
         JAVA_TOOL_OPTIONS,
       },
+      // Capture the agent's stdout to a file we can read back over exec.
+      init: { exec: [...AGENT_INIT_EXEC] },
       guest: { cpu_kind: "performance", cpus: 2, memory_mb: 4096 },
+
       services: [
         {
           ports: [
