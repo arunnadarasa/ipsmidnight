@@ -12,10 +12,32 @@ export const IDENTUS_DB = {
   databases: ["pollux", "connect", "agent", "node"] as const,
 } as const;
 
-/** Four separate databases keep the agent's schema migrations from colliding. */
-export const POSTGRES_INIT_SQL = IDENTUS_DB.databases
-  .map((db) => `CREATE DATABASE ${db};`)
-  .join("\n");
+/**
+ * Four separate databases keep the agent's schema migrations from colliding.
+ *
+ * Each database also needs its own `<db>-application-user` login role: the very
+ * first statement of the agent's Flyway migration is
+ * `ALTER DEFAULT PRIVILEGES … TO "<db>-application-user"`, which aborts the boot
+ * with `role "pollux-application-user" does not exist` when the role is absent.
+ * The grant must be applied inside each database, hence the `\connect` hops.
+ * Runs only while the Postgres data directory is empty.
+ */
+export const POSTGRES_INIT_SQL = [
+  ...IDENTUS_DB.databases.map(
+    (db) => `DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${db}-application-user') THEN
+    CREATE ROLE "${db}-application-user" LOGIN PASSWORD 'password';
+  END IF;
+END $$;`,
+  ),
+  ...IDENTUS_DB.databases.map((db) => `CREATE DATABASE ${db};`),
+  ...IDENTUS_DB.databases.flatMap((db) => [
+    `\\connect ${db}`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${db}-application-user";`,
+    `GRANT USAGE, CREATE ON SCHEMA public TO "${db}-application-user";`,
+  ]),
+].join("\n");
+
 
 /** The JVM must prefer IPv6 — Fly's private network is 6PN only. */
 export const JAVA_TOOL_OPTIONS =
