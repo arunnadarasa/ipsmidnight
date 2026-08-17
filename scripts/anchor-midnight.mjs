@@ -40,7 +40,9 @@ const INDEXER_WS = INDEXER.replace(/^http/, "ws") + "/ws";
 // deploy wrote cannot be reloaded (RpcError 117 / missing private state).
 const GENESIS_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
 const PRIVATE_STATE_ID = "ips-anchor-registry";
-const PRIVATE_STATE_STORE = "ips-midnight-level-db";
+// The level store lives in the process cwd; pass --store when re-attaching to a
+// store written by an earlier run under a different name.
+const PRIVATE_STATE_STORE = args.store ?? "ips-midnight-level-db";
 const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-Registry-2026";
 const DEPLOYER_SECRET_HEX = "11".repeat(32);
 
@@ -101,6 +103,12 @@ async function main() {
     privateStoragePasswordProvider: () => PRIVATE_STORAGE_PASSWORD,
   });
   await privateStateProvider.setContractAddress?.(CONTRACT_ADDRESS);
+  // The contract keeps no per-user private state (the only witness returns a
+  // fixed deployer secret), so a fresh sandbox can seed an empty private state
+  // instead of failing with "No private state found at private state ID".
+  if (!(await privateStateProvider.get(PRIVATE_STATE_ID))) {
+    await privateStateProvider.set(PRIVATE_STATE_ID, {});
+  }
 
   // The proof server needs the circuit's IR alongside the preimage; without
   // the zkConfigProvider argument /check answers 400 Bad Request.
