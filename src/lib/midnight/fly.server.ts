@@ -285,6 +285,10 @@ export async function repairMidnightStack(appName: string, region: string) {
     if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
+      if (kind === "node") {
+        // Give the RPC a moment to listen again before the indexer is restarted.
+        await flyOptional(`/apps/${appName}/machines/${existing.id}/wait?state=started&timeout=60`);
+      }
     } else {
       await fly(`/apps/${appName}/machines`, { method: "POST", body });
     }
