@@ -229,8 +229,11 @@ async function ensureMachine(
 
 /** Re-applies corrected specs to an existing app and restarts each machine. */
 export async function repairMidnightStack(appName: string, region: string) {
+  // Older stacks have no private IP, so `<app>.flycast` does not resolve yet.
+  await allocateIps(appName);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
+
   for (const kind of ["node", "indexer", "proof"] as const) {
     const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
     const spec = machineConfig(kind, appName, volumeId);
@@ -343,14 +346,21 @@ async function probeIndexer(url: string): Promise<{ probe: ProbeResult; blockHei
     });
     const json = (await res.json()) as { data?: { block?: { height?: number } }; errors?: unknown };
     const height = json.data?.block?.height ?? null;
+    // An indexer that answers GraphQL but has ingested no block is NOT ready:
+    // reporting it as ok made the whole stack look healthy while nothing could
+    // be deployed or anchored against an empty chain.
     return {
       probe: {
-        ok: res.ok && !json.errors,
+        ok: res.ok && !json.errors && height !== null,
         status: res.status,
-        detail: height === null ? "reachable, no block yet" : `block #${height}`,
+        detail:
+          height === null
+            ? "GraphQL up, no blocks ingested — the indexer cannot reach the node's RPC"
+            : `block #${height}`,
       },
       blockHeight: height,
     };
+
   } catch (err) {
     return {
       probe: { ok: false, status: null, detail: err instanceof Error ? err.message : "unreachable" },
