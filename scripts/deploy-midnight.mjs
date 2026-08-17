@@ -122,13 +122,17 @@ async function main() {
   const wallet = await MidnightWalletProvider.build(log, env, GENESIS_SEED);
   await wallet.start(true);
 
+  // The proof server needs the circuit's IR alongside the preimage; without
+  // the zkConfigProvider argument /check answers 400 Bad Request.
+  const zkConfigProvider = new NodeZkConfigProvider(CONTRACT_DIR);
+
   const providers = {
     privateStateProvider: levelPrivateStateProvider({
       privateStateStoreName: PRIVATE_STATE_STORE,
       accountId: PRIVATE_STATE_ID,
       privateStoragePasswordProvider: () => PRIVATE_STORAGE_PASSWORD,
     }),
-    zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
+    zkConfigProvider,
     proofProvider: httpClientProofProvider(PROOF, zkConfigProvider),
     publicDataProvider: indexerPublicDataProvider(INDEXER, INDEXER_WS),
     walletProvider: wallet,

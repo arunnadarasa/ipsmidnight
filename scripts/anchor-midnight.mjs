@@ -102,9 +102,13 @@ async function main() {
   });
   await privateStateProvider.setContractAddress?.(CONTRACT_ADDRESS);
 
+  // The proof server needs the circuit's IR alongside the preimage; without
+  // the zkConfigProvider argument /check answers 400 Bad Request.
+  const zkConfigProvider = new NodeZkConfigProvider(CONTRACT_DIR);
+
   const providers = {
     privateStateProvider,
-    zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
+    zkConfigProvider,
     proofProvider: httpClientProofProvider(PROOF, zkConfigProvider),
     publicDataProvider: indexerPublicDataProvider(INDEXER, INDEXER_WS),
     walletProvider: wallet,
