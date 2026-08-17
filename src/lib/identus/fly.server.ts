@@ -250,7 +250,7 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
 }
 
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
-  const spec = machineSpec(kind, appName, adminKey, await walletSeedFrom(adminKey));
+  const spec = machineSpec(kind, appName, adminKey);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -269,9 +269,9 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
-  const walletSeed = await walletSeedFrom(adminKey);
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey, walletSeed);
+    const spec = machineSpec(kind, appName, adminKey);
+
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     if (existing) {
@@ -503,7 +503,7 @@ export async function repairAgentEndpoints(appName: string, adminKey: string, re
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const agent = machines.find((m) => m.name === "identus-cloud-agent");
   if (!agent) throw new Error("No cloud-agent machine on this app — provision it first.");
-  const spec = machineSpec("cloud-agent", appName, adminKey, await walletSeedFrom(adminKey));
+  const spec = machineSpec("cloud-agent", appName, adminKey);
   await fly(`/apps/${appName}/machines/${agent.id}`, {
     method: "POST",
     body: JSON.stringify({ name: spec.name, region, config: spec.config }),
