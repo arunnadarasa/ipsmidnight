@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
+  AGENT_INIT_EXEC,
+  AGENT_LOG_PATH,
   IDENTUS_DB,
   IDENTUS_IMAGES,
   JAVA_TOOL_OPTIONS,
@@ -8,6 +10,7 @@ import {
   identusStackUrls,
   type IdentusStackUrls,
 } from "./fly-shared";
+
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
@@ -139,13 +142,14 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         },
         files: [{ guest_path: "/docker-entrypoint-initdb.d/00-init.sql", raw_value: b64(POSTGRES_INIT_SQL) }],
         guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
-        services: [
-          { ports: [], protocol: "tcp", internal_port: 5432, autostop: false },
-        ],
+        // Postgres is reached over 6PN only — declaring a service here is what
+        // makes Fly treat the machine as a public web service and can stop the
+        // private DNS record from being what the JVM expects.
         restart: { policy: "always" },
       },
     };
   }
+
 
   if (kind === "prism-node") {
     return {
@@ -190,6 +194,13 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         AGENT_DB_NAME: "agent",
         AGENT_DB_USER: IDENTUS_DB.user,
         AGENT_DB_PASSWORD: IDENTUS_DB.password,
+        // The agent's own Flyway/secret-storage layer reads the plain POSTGRES_*
+        // group; without it, secret storage initialisation fails on boot.
+        POSTGRES_HOST: pgHost,
+        POSTGRES_PORT: "5432",
+        POSTGRES_DB: "agent",
+        POSTGRES_USER: IDENTUS_DB.user,
+        POSTGRES_PASSWORD: IDENTUS_DB.password,
         PRISM_NODE_HOST: `identus-prism-node.process.${appName}.internal`,
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
@@ -203,7 +214,10 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         DIDCOMM_SERVICE_URL: urls.didcommUrl,
         JAVA_TOOL_OPTIONS,
       },
+      // Capture the agent's stdout to a file we can read back over exec.
+      init: { exec: [...AGENT_INIT_EXEC] },
       guest: { cpu_kind: "performance", cpus: 2, memory_mb: 4096 },
+
       services: [
         {
           ports: [
@@ -329,34 +343,88 @@ export async function identusMachineStates(appName: string) {
   }));
 }
 
+/** Picks the most diagnostic slice out of a raw log blob. */
+function pickErrorText(raw: string): string | null {
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!lines.length) return null;
+  const re = /error|exception|caused by|fatal|failed|refused|unknownhost|denied|timeout|no such/i;
+  let idx = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line && re.test(line)) {
+      idx = i;
+      break;
+    }
+  }
+
+  const slice = idx >= 0 ? lines.slice(idx, idx + 4) : lines.slice(-4);
+  return slice.join(" | ").slice(0, 700);
+}
+
 /**
- * Last error-ish line from the cloud-agent's log stream. The Machines API has no
- * log endpoint, so this uses the app log API; every failure degrades to null
- * because a missing log must never fail a readiness check.
+ * The agent's own error text. The Machines API exposes no log endpoint, so the
+ * primary source is the boot log file written by `AGENT_INIT_EXEC`, read back
+ * through `machines/:id/exec`. Falls back to the legacy app log API, then to the
+ * machine's health-check output. Every failure degrades to a short explanation
+ * instead of null so the UI never shows a silent spinner.
  */
 export async function agentLogTail(appName: string): Promise<string | null> {
   try {
     const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
     const agent = machines.find((m) => m.name === "identus-cloud-agent");
     if (!agent) return null;
-    const res = await fetch(
-      `https://api.fly.io/api/v1/apps/${appName}/logs?instance=${agent.id}`,
-      { headers: { Authorization: `Bearer ${token()}` }, signal: AbortSignal.timeout(15_000) },
-    );
-    if (!res.ok) return null;
-    const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
-    const lines = (json.data ?? [])
-      .map((d) => (d.attributes?.message ?? "").trim())
-      .filter(Boolean);
-    const interesting = lines.filter((l) =>
-      /error|exception|caused by|fatal|failed|refused|unknownhost/i.test(l),
-    );
-    const pick = interesting.at(-1) ?? lines.at(-1) ?? null;
-    return pick ? pick.slice(0, 400) : null;
+
+    // 1. Boot log file inside the machine (works while the machine is running).
+    try {
+      const exec = await flyOptional<{ exit_code?: number; stdout?: string; stderr?: string }>(
+        `/apps/${appName}/machines/${agent.id}/exec`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            command: ["/bin/sh", "-c", `tail -c 4000 ${AGENT_LOG_PATH} 2>/dev/null`],
+            timeout: 20,
+          }),
+        },
+      );
+      const text = pickErrorText(`${exec?.stdout ?? ""}\n${exec?.stderr ?? ""}`);
+      if (text) return text;
+    } catch {
+      // exec is unavailable while the machine is stopped/restarting — fall through
+    }
+
+    // 2. Legacy app log API (works with org-scoped tokens only).
+    try {
+      const res = await fetch(`https://api.fly.io/api/v1/apps/${appName}/logs?instance=${agent.id}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
+        const text = pickErrorText((json.data ?? []).map((d) => d.attributes?.message ?? "").join("\n"));
+        if (text) return text;
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Health-check output, plus the exit summary as a last resort.
+    const detail = (await flyOptional<FlyMachine>(`/apps/${appName}/machines/${agent.id}`)) ?? agent;
+    const checkOutput = (detail.checks ?? [])
+      .map((c) => (c.output ?? "").trim())
+      .filter(Boolean)
+      .join(" | ");
+    if (checkOutput) return checkOutput.slice(0, 400);
+    const exit = exitSummary(detail);
+    if (exit.detail) return `${exit.detail} No log line captured yet — the boot log appears after the next restart.`;
+    return null;
   } catch {
     return null;
   }
 }
+
 
 
 export async function identusDiagnostics(appName: string) {

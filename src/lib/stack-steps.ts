@@ -118,11 +118,15 @@ export function identusSteps(input: {
     },
     machineStep("pg", "Postgres started", machines, "identus-postgres", "creates four databases"),
     machineStep("prism", "PRISM node booting", machines, "identus-prism-node"),
-    machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start"),
+    withLog(
+      machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start"),
+      logTail,
+    ),
     withLog(
       probeStep("system", "Agent health: system", probes, "system", agentUp, "first boot migrates four databases, ~4 min"),
       logTail,
     ),
+
     probeStep("did-registrar", "Agent health: DID registrar", probes, "did-registrar", agentUp),
     probeStep("issuance", "Agent health: issuance", probes, "issuance", agentUp),
     probeStep("connections", "Agent health: connections", probes, "connections", agentUp),
