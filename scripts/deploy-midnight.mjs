@@ -98,14 +98,28 @@ async function main() {
   const contractModule = await import(pathToFileURL(contractEntry).href);
   const Contract = contractModule.Contract ?? contractModule.default?.Contract;
 
-  const wallet = await MidnightWalletProvider.build({
-    seed: GENESIS_SEED,
-    networkId: (walletSdk.NetworkId?.NetworkId ?? walletSdk.NetworkId).Undeployed,
+  const NetworkIds = walletSdk.NetworkId?.NetworkId ?? walletSdk.NetworkId;
+  const NODE_RPC = args.node ?? INDEXER.replace(/\/api\/v4\/graphql$/, "") + ":9944";
+  const env = {
+    walletNetworkId: NetworkIds.Undeployed,
+    networkId: "undeployed",
     indexer: INDEXER,
     indexerWS: INDEXER_WS,
+    node: NODE_RPC,
+    nodeWS: NODE_RPC.replace(/^http/, "ws"),
     proofServer: PROOF,
-    node: INDEXER.replace(/\/api\/v4\/graphql$/, ""),
-  });
+    faucet: undefined,
+  };
+  const log = {
+    info: (...a) => console.log("[wallet]", ...a),
+    warn: (...a) => console.warn("[wallet]", ...a),
+    error: (...a) => console.error("[wallet]", ...a),
+    debug: () => {},
+    trace: () => {},
+  };
+
+  const wallet = await MidnightWalletProvider.build(log, env, GENESIS_SEED);
+  await wallet.start(true);
 
   const providers = {
     privateStateProvider: levelPrivateStateProvider({
