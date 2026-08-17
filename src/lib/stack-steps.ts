@@ -259,6 +259,7 @@ export function midnightSteps(input: {
         const diag = [
           diagnostics?.nodeRpcFromIndexer ? `indexer→node: ${diagnostics.nodeRpcFromIndexer}` : null,
           diagnostics?.nodeRpcFromNode ? `node RPC: ${diagnostics.nodeRpcFromNode}` : null,
+          diagnostics?.ips ? `app IPs: ${diagnostics.ips}` : null,
           diagnostics?.indexerLog ? `indexer log: ${diagnostics.indexerLog.slice(-600)}` : null,
         ]
           .filter(Boolean)
@@ -268,8 +269,8 @@ export function midnightSteps(input: {
       })(),
       hint:
         probes && !probes.indexer.ok && probes.blockHeight === null && indexerUp && nodeUp
-          ? "the indexer answers but has no blocks — run Repair to reconnect it to the node RPC"
-          : "ingests blocks from the node over the private network",
+          ? "the indexer answers but has ingested no blocks — press Fix indexer to republish the node RPC and restart the indexer against it"
+          : "ingests blocks from the node's RPC, published through the Fly edge",
     },
 
 
