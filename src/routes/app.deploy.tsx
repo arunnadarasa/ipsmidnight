@@ -110,7 +110,10 @@ function DeployConsole() {
     enabled: Boolean(selected),
     refetchInterval: (q) => {
       const d = q.state.data as ReadinessResult | null;
-      return d && d.allReady ? false : 12000;
+      if (d && d.allReady) return false;
+      const started = selected ? new Date(selected.created_at).getTime() : Date.now();
+      // Back off once a stack has been booting for more than ten minutes.
+      return Date.now() - started > 10 * 60 * 1000 ? 20000 : 12000;
     },
   });
 
