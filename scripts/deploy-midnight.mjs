@@ -79,20 +79,23 @@ async function waitForStack() {
 async function main() {
   await waitForStack();
 
-  const { setNetworkId } = require("@midnight-ntwrk/midnight-js-network-id");
+  // Every SDK package here is ESM-only: several ship no dist/cjs build, so
+  // require() fails with MODULE_NOT_FOUND on @midnight-ntwrk/compact-js.
+  const { setNetworkId } = await import("@midnight-ntwrk/midnight-js-network-id");
   setNetworkId("undeployed");
 
-  const { deployContract } = require("@midnight-ntwrk/midnight-js-contracts");
-  const { NodeZkConfigProvider } = require("@midnight-ntwrk/midnight-js-node-zk-config-provider");
-  const { levelPrivateStateProvider } = require("@midnight-ntwrk/midnight-js-level-private-state-provider");
-  const { httpClientProofProvider } = require("@midnight-ntwrk/midnight-js-http-client-proof-provider");
-  const { indexerPublicDataProvider } = require("@midnight-ntwrk/midnight-js-indexer-public-data-provider");
-  const { MidnightWalletProvider } = require("@midnight-ntwrk/testkit-js");
-  const { NetworkId } = require("@midnight-ntwrk/wallet-sdk");
+  const { deployContract } = await import("@midnight-ntwrk/midnight-js-contracts");
+  const { NodeZkConfigProvider } = await import("@midnight-ntwrk/midnight-js-node-zk-config-provider");
+  const { levelPrivateStateProvider } = await import("@midnight-ntwrk/midnight-js-level-private-state-provider");
+  const { httpClientProofProvider } = await import("@midnight-ntwrk/midnight-js-http-client-proof-provider");
+  const { indexerPublicDataProvider } = await import("@midnight-ntwrk/midnight-js-indexer-public-data-provider");
+  const { MidnightWalletProvider } = await import("@midnight-ntwrk/testkit-js");
+  const walletSdk = await import("@midnight-ntwrk/wallet-sdk");
 
-  const contractModule = existsSync(`${CONTRACT_DIR}/contract/index.js`)
-    ? await import(`../${CONTRACT_DIR}/contract/index.js`)
-    : require(`../${CONTRACT_DIR}/contract/index.cjs`);
+  const contractEntry = existsSync(`${CONTRACT_DIR}/contract/index.js`)
+    ? `${CONTRACT_DIR}/contract/index.js`
+    : `${CONTRACT_DIR}/contract/index.cjs`;
+  const contractModule = await import(pathToFileURL(contractEntry).href);
   const Contract = contractModule.Contract ?? contractModule.default?.Contract;
 
   const wallet = await MidnightWalletProvider.build({
