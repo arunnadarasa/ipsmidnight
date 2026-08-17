@@ -100,7 +100,7 @@ async function main() {
 
   const wallet = await MidnightWalletProvider.build({
     seed: GENESIS_SEED,
-    networkId: NetworkId.NetworkId.Undeployed,
+    networkId: (walletSdk.NetworkId?.NetworkId ?? walletSdk.NetworkId).Undeployed,
     indexer: INDEXER,
     indexerWS: INDEXER_WS,
     proofServer: PROOF,
@@ -135,7 +135,7 @@ async function main() {
   const deployTx = deployed.deployTxData.public.txId ?? null;
 
   writeFileSync(
-    "src/data/midnight-contract.undeployed.json",
+    OUT_FILE,
     `${JSON.stringify(
       {
         address,
