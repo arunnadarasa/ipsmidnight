@@ -147,13 +147,14 @@ function machineConfig(
         // Chain data survives restarts and repairs, so a deployed contract
         // address stays valid.
         ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
-        // The RPC is published through the Fly edge on 9944 (tls + http, so the
-        // WebSocket upgrade passes through). The edge reaches the container over
-        // IPv4, which is the only thing the IPv4-bound Substrate RPC accepts —
-        // and unlike flycast it needs no private-IP allocation to work.
+        // The RPC is published through the Fly edge on 9944 as a plain TLS
+        // tunnel (no `http` handler): Fly's HTTP layer closed long-lived
+        // WebSocket subscriptions with a 1000 Normal Closure mid-transaction,
+        // which broke extrinsic submission. A tls-only handler passes the
+        // WebSocket straight through to the IPv4-bound Substrate RPC.
         services: [
           {
-            ports: [{ port: 9944, handlers: ["tls", "http"] }],
+            ports: [{ port: 9944, handlers: ["tls"] }],
             protocol: "tcp",
             internal_port: 9944,
             autostop: false,

@@ -21,12 +21,12 @@
  *                                   --proof   https://<app>.fly.dev:6300
  */
 import { writeFileSync, existsSync } from "node:fs";
-import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import WebSocket from "ws";
 
 globalThis.WebSocket = WebSocket;
 
-const require = createRequire(import.meta.url);
 const args = Object.fromEntries(
   process.argv.slice(2).flatMap((a, i, all) => (a.startsWith("--") ? [[a.slice(2), all[i + 1]]] : [])),
 );
@@ -46,7 +46,12 @@ const PRIVATE_STATE_STORE = "ips-midnight-level-db";
 const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-2026";
 const DEPLOYER_SECRET_HEX = "11".repeat(32);
 
-const CONTRACT_DIR = "contracts/managed/ips-anchor-registry";
+// The Midnight JS SDK is ESM-only and heavy; it is installed in a scratch
+// folder rather than the app's package.json, so the script may be copied next
+// to that node_modules and pointed back at the repo with --project.
+const PROJECT = resolve(args.project ?? process.cwd());
+const CONTRACT_DIR = resolve(PROJECT, "contracts/managed/ips-anchor-registry");
+const OUT_FILE = resolve(PROJECT, "src/data/midnight-contract.undeployed.json");
 if (!existsSync(`${CONTRACT_DIR}/contract/index.js`) && !existsSync(`${CONTRACT_DIR}/contract/index.cjs`)) {
   console.error(`Compile first: compact compile contracts/IpsAnchorRegistry.compact ${CONTRACT_DIR}`);
   process.exit(1);
@@ -74,36 +79,53 @@ async function waitForStack() {
 async function main() {
   await waitForStack();
 
-  const { setNetworkId } = require("@midnight-ntwrk/midnight-js-network-id");
+  // Every SDK package here is ESM-only: several ship no dist/cjs build, so
+  // require() fails with MODULE_NOT_FOUND on @midnight-ntwrk/compact-js.
+  const { setNetworkId } = await import("@midnight-ntwrk/midnight-js-network-id");
   setNetworkId("undeployed");
 
-  const { deployContract } = require("@midnight-ntwrk/midnight-js-contracts");
-  const { NodeZkConfigProvider } = require("@midnight-ntwrk/midnight-js-node-zk-config-provider");
-  const { levelPrivateStateProvider } = require("@midnight-ntwrk/midnight-js-level-private-state-provider");
-  const { httpClientProofProvider } = require("@midnight-ntwrk/midnight-js-http-client-proof-provider");
-  const { indexerPublicDataProvider } = require("@midnight-ntwrk/midnight-js-indexer-public-data-provider");
-  const { MidnightWalletProvider } = require("@midnight-ntwrk/testkit-js");
-  const { NetworkId } = require("@midnight-ntwrk/wallet-sdk");
+  const { deployContract } = await import("@midnight-ntwrk/midnight-js-contracts");
+  const { NodeZkConfigProvider } = await import("@midnight-ntwrk/midnight-js-node-zk-config-provider");
+  const { levelPrivateStateProvider } = await import("@midnight-ntwrk/midnight-js-level-private-state-provider");
+  const { httpClientProofProvider } = await import("@midnight-ntwrk/midnight-js-http-client-proof-provider");
+  const { indexerPublicDataProvider } = await import("@midnight-ntwrk/midnight-js-indexer-public-data-provider");
+  const { MidnightWalletProvider } = await import("@midnight-ntwrk/testkit-js");
+  const walletSdk = await import("@midnight-ntwrk/wallet-sdk");
 
-  const contractModule = existsSync(`${CONTRACT_DIR}/contract/index.js`)
-    ? await import(`../${CONTRACT_DIR}/contract/index.js`)
-    : require(`../${CONTRACT_DIR}/contract/index.cjs`);
+  const contractEntry = existsSync(`${CONTRACT_DIR}/contract/index.js`)
+    ? `${CONTRACT_DIR}/contract/index.js`
+    : `${CONTRACT_DIR}/contract/index.cjs`;
+  const contractModule = await import(pathToFileURL(contractEntry).href);
   const Contract = contractModule.Contract ?? contractModule.default?.Contract;
 
-  const wallet = await MidnightWalletProvider.build({
-    seed: GENESIS_SEED,
-    networkId: NetworkId.NetworkId.Undeployed,
+  const NetworkIds = walletSdk.NetworkId?.NetworkId ?? walletSdk.NetworkId;
+  const NODE_RPC = args.node ?? INDEXER.replace(/\/api\/v4\/graphql$/, "") + ":9944";
+  const env = {
+    walletNetworkId: NetworkIds.Undeployed,
+    networkId: "undeployed",
     indexer: INDEXER,
     indexerWS: INDEXER_WS,
+    node: NODE_RPC,
+    nodeWS: NODE_RPC.replace(/^http/, "ws"),
     proofServer: PROOF,
-    node: INDEXER.replace(/\/api\/v4\/graphql$/, ""),
-  });
+    faucet: undefined,
+  };
+  const log = {
+    info: (...a) => console.log("[wallet]", ...a),
+    warn: (...a) => console.warn("[wallet]", ...a),
+    error: (...a) => console.error("[wallet]", ...a),
+    debug: () => {},
+    trace: () => {},
+  };
+
+  const wallet = await MidnightWalletProvider.build(log, env, GENESIS_SEED);
+  await wallet.start(true);
 
   const providers = {
     privateStateProvider: levelPrivateStateProvider({
       privateStateStoreName: PRIVATE_STATE_STORE,
       accountId: PRIVATE_STATE_ID,
-      passwordProvider: () => PRIVATE_STORAGE_PASSWORD,
+      privateStoragePasswordProvider: () => PRIVATE_STORAGE_PASSWORD,
     }),
     zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
     proofProvider: httpClientProofProvider(PROOF),
@@ -116,10 +138,18 @@ async function main() {
     localSecretKey: () => [{}, Uint8Array.from(Buffer.from(DEPLOYER_SECRET_HEX, "hex"))],
   };
 
+  // midnight-js 4.x takes a compact-js CompiledContract binding, not a raw
+  // `new Contract(witnesses)` instance.
+  const { CompiledContract } = await import("@midnight-ntwrk/compact-js");
+  const compiledContract = CompiledContract.make(PRIVATE_STATE_ID, Contract).pipe(
+    CompiledContract.withWitnesses(witnesses),
+    CompiledContract.withCompiledFileAssets(CONTRACT_DIR),
+  );
+
   console.log("deploying IpsAnchorRegistry (first proof can take 30–120s)…");
   const deployed = await deployContract(providers, {
     privateStateId: PRIVATE_STATE_ID,
-    contract: new Contract(witnesses),
+    compiledContract,
     initialPrivateState: {},
   });
 
@@ -127,7 +157,7 @@ async function main() {
   const deployTx = deployed.deployTxData.public.txId ?? null;
 
   writeFileSync(
-    "src/data/midnight-contract.undeployed.json",
+    OUT_FILE,
     `${JSON.stringify(
       {
         address,
