@@ -91,13 +91,21 @@ function probeStep(
   };
 }
 
+/** Surfaces the agent's own log line on the health step so a boot crash is readable. */
+function withLog(step: StackStep, logTail?: string | null): StackStep {
+  if (step.state === "done" || !logTail) return step;
+  return { ...step, detail: step.detail ? `${step.detail} — agent log: ${logTail}` : `agent log: ${logTail}` };
+}
+
 export function identusSteps(input: {
   appName?: string | null;
   machines?: MachineLike[] | undefined;
   probes?: Probe[] | undefined;
   status?: string;
+  /** Last error line from the cloud-agent log, when the check pulled one. */
+  logTail?: string | null;
 }): StackStep[] {
-  const { appName, machines, probes } = input;
+  const { appName, machines, probes, logTail } = input;
   const created = Boolean(appName);
   const agentUp = machines?.find((m) => m.name === "identus-cloud-agent")?.state === "started";
 
@@ -111,7 +119,10 @@ export function identusSteps(input: {
     machineStep("pg", "Postgres started", machines, "identus-postgres", "creates four databases"),
     machineStep("prism", "PRISM node booting", machines, "identus-prism-node"),
     machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start"),
-    probeStep("system", "Agent health: system", probes, "system", agentUp, "first boot migrates four databases, ~4 min"),
+    withLog(
+      probeStep("system", "Agent health: system", probes, "system", agentUp, "first boot migrates four databases, ~4 min"),
+      logTail,
+    ),
     probeStep("did-registrar", "Agent health: DID registrar", probes, "did-registrar", agentUp),
     probeStep("issuance", "Agent health: issuance", probes, "issuance", agentUp),
     probeStep("connections", "Agent health: connections", probes, "connections", agentUp),

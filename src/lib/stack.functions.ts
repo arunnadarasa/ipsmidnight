@@ -108,7 +108,7 @@ export const checkFullStack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { appPrefix: string }) => input)
   .handler(async ({ data, context }) => {
-    const { identusMachineStates } = await import("@/lib/identus/fly.server");
+    const { identusMachineStates, agentLogTail } = await import("@/lib/identus/fly.server");
     const { probeAgent } = await import("@/lib/identus/cloud-agent.server");
     const { identusStackUrls } = await import("@/lib/identus/fly-shared");
     const { machineStates, probeStack } = await import("@/lib/midnight/fly.server");
@@ -130,6 +130,9 @@ export const checkFullStack = createServerFn({ method: "POST" })
       ? await probeAgent({ baseUrl: identusUrls.agentUrl, apiKey: conn.api_key })
       : { probes: [], ready: false };
     const identusStatus = identusHealth.ready ? "ready" : identusMachines.length ? "provisioning" : "unknown";
+    // Only pull logs when something is wrong — that is the one moment the
+    // stack trace matters, and it keeps the happy-path check fast.
+    const identusLog = identusHealth.ready ? null : await agentLogTail(identusUrls.appName);
     await supabase
       .from("fly_deployments")
       .update({ status: identusStatus, machines: identusMachines as never })
@@ -156,7 +159,14 @@ export const checkFullStack = createServerFn({ method: "POST" })
       .eq("app_prefix", data.appPrefix);
 
     return {
-      identus: { urls: identusUrls, machines: identusMachines, health: identusHealth, status: identusStatus, ready: identusHealth.ready },
+      identus: {
+        urls: identusUrls,
+        machines: identusMachines,
+        health: identusHealth,
+        status: identusStatus,
+        ready: identusHealth.ready,
+        logTail: identusLog,
+      },
       midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady },
       allReady: identusHealth.ready && midnightReady,
       appPrefix: data.appPrefix,

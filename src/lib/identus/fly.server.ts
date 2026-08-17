@@ -110,7 +110,20 @@ export function mintAdminKey() {
 
 type MachineKind = "postgres" | "prism-node" | "cloud-agent";
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
+/**
+ * With `DEFAULT_WALLET_ENABLED` + postgres secret storage the agent needs a
+ * 32-byte hex seed to initialise the default wallet's secret storage; without it
+ * boot aborts right after the HTTP/DIDComm endpoints are logged. Derived from
+ * the stored admin key so it stays stable across repairs and never needs its own
+ * column (a changed seed would invalidate every already-published DID).
+ */
+export async function walletSeedFrom(adminKey: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ips-wallet-seed:${adminKey}`));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function machineSpec(kind: MachineKind, appName: string, adminKey: string, walletSeed: string) {
+
   const pgHost = `identus-postgres.process.${appName}.internal`;
   const urls = identusStackUrls(appName);
 
@@ -181,6 +194,7 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
         DEFAULT_WALLET_ENABLED: "true",
+        DEFAULT_WALLET_SEED: walletSeed,
         DEFAULT_WALLET_AUTH_API_KEY: adminKey,
         ADMIN_TOKEN: adminKey,
         API_KEY_ENABLED: "true",
@@ -240,7 +254,7 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
 }
 
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
-  const spec = machineSpec(kind, appName, adminKey);
+  const spec = machineSpec(kind, appName, adminKey, await walletSeedFrom(adminKey));
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -259,8 +273,9 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
+  const walletSeed = await walletSeedFrom(adminKey);
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey);
+    const spec = machineSpec(kind, appName, adminKey, walletSeed);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     if (existing) {
@@ -302,6 +317,7 @@ export async function provisionIdentusStack(input: {
 }
 
 export async function identusMachineStates(appName: string) {
+
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   return machines.map((m) => ({
     name: m.name,
@@ -311,6 +327,35 @@ export async function identusMachineStates(appName: string) {
     checks: (m.checks ?? []).map((c) => ({ name: c.name, status: c.status, output: (c.output ?? "").slice(0, 300) })),
     ...exitSummary(m),
   }));
+}
+
+/**
+ * Last error-ish line from the cloud-agent's log stream. The Machines API has no
+ * log endpoint, so this uses the app log API; every failure degrades to null
+ * because a missing log must never fail a readiness check.
+ */
+export async function agentLogTail(appName: string): Promise<string | null> {
+  try {
+    const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+    const agent = machines.find((m) => m.name === "identus-cloud-agent");
+    if (!agent) return null;
+    const res = await fetch(
+      `https://api.fly.io/api/v1/apps/${appName}/logs?instance=${agent.id}`,
+      { headers: { Authorization: `Bearer ${token()}` }, signal: AbortSignal.timeout(15_000) },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
+    const lines = (json.data ?? [])
+      .map((d) => (d.attributes?.message ?? "").trim())
+      .filter(Boolean);
+    const interesting = lines.filter((l) =>
+      /error|exception|caused by|fatal|failed|refused|unknownhost/i.test(l),
+    );
+    const pick = interesting.at(-1) ?? lines.at(-1) ?? null;
+    return pick ? pick.slice(0, 400) : null;
+  } catch {
+    return null;
+  }
 }
 
 
@@ -408,7 +453,7 @@ export async function repairAgentEndpoints(appName: string, adminKey: string, re
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const agent = machines.find((m) => m.name === "identus-cloud-agent");
   if (!agent) throw new Error("No cloud-agent machine on this app — provision it first.");
-  const spec = machineSpec("cloud-agent", appName, adminKey);
+  const spec = machineSpec("cloud-agent", appName, adminKey, await walletSeedFrom(adminKey));
   await fly(`/apps/${appName}/machines/${agent.id}`, {
     method: "POST",
     body: JSON.stringify({ name: spec.name, region, config: spec.config }),
