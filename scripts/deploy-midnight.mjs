@@ -138,10 +138,18 @@ async function main() {
     localSecretKey: () => [{}, Uint8Array.from(Buffer.from(DEPLOYER_SECRET_HEX, "hex"))],
   };
 
+  // midnight-js 4.x takes a compact-js CompiledContract binding, not a raw
+  // `new Contract(witnesses)` instance.
+  const { CompiledContract } = await import("@midnight-ntwrk/compact-js");
+  const compiledContract = CompiledContract.make(PRIVATE_STATE_ID, Contract).pipe(
+    CompiledContract.withWitnesses(witnesses),
+    CompiledContract.withCompiledFileAssets(CONTRACT_DIR),
+  );
+
   console.log("deploying IpsAnchorRegistry (first proof can take 30–120s)…");
   const deployed = await deployContract(providers, {
     privateStateId: PRIVATE_STATE_ID,
-    contract: new Contract(witnesses),
+    compiledContract,
     initialPrivateState: {},
   });
 
