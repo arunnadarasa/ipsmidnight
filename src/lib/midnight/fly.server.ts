@@ -269,12 +269,15 @@ async function ensureMachine(
 
 /** Re-applies corrected specs to an existing app and restarts each machine. */
 export async function repairMidnightStack(appName: string, region: string) {
-  // Older stacks have no private IP, so `<app>.flycast` does not resolve yet.
+  // Keeps older apps in step: public IPs for the edge-published node RPC, and a
+  // private IP so the flycast diagnostic can still be reported truthfully.
   await allocateIps(appName);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
 
-  for (const kind of ["node", "indexer", "proof"] as const) {
+  // Node and proof first, indexer LAST: the indexer only retries its node
+  // connection on boot, so it must start against an already-listening RPC.
+  for (const kind of ["node", "proof", "indexer"] as const) {
     const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
     const spec = machineConfig(kind, appName, volumeId);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
