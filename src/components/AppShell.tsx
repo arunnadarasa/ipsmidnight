@@ -63,14 +63,14 @@ export function AppShell({ children, email }: { children: ReactNode; email?: str
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-border px-4 py-3 lg:hidden">
+        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon" aria-label="Open navigation">
+              <Button variant="outline" size="icon" aria-label="Open navigation" className="h-10 w-10 shrink-0">
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-64 bg-sidebar p-4">
+            <SheetContent side="left" className="w-[17rem] bg-sidebar p-4">
               <SheetTitle className="mb-4 font-display text-sm">IPS Console</SheetTitle>
               <NavLinks />
               <Button variant="ghost" size="sm" className="mt-6 w-full justify-start" onClick={() => void signOut()}>
@@ -80,7 +80,7 @@ export function AppShell({ children, email }: { children: ReactNode; email?: str
           </Sheet>
           <span className="min-w-0 truncate font-display text-sm font-semibold">IPS Console</span>
         </header>
-        <main className="min-w-0 flex-1 p-4 pb-24 sm:p-6 lg:p-8">{children}</main>
+        <main className="min-w-0 flex-1 px-3 py-4 pb-24 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );
