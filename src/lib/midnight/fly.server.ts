@@ -1,8 +1,26 @@
-import { IMAGES, INDEXER_ENV, stackUrls, type StackUrls } from "./shared";
+import { IMAGES, INDEXER_ENV, nodeRpcWsUrl, stackUrls, type StackUrls } from "./shared";
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
-type FlyMachine = { id: string; name: string; state: string; region?: string };
+const NODE_VOLUME = "midnight_chain";
+const NODE_DATA_PATH = "/node/chain";
+
+type FlyExitEvent = { exit_code?: number | null; oom_killed?: boolean | null };
+type FlyMachineEvent = {
+  type?: string;
+  status?: string;
+  timestamp?: number;
+  request?: { exit_event?: FlyExitEvent | null } | null;
+};
+type FlyMachine = {
+  id: string;
+  name: string;
+  state: string;
+  region?: string;
+  events?: FlyMachineEvent[];
+  config?: { image?: string } | null;
+};
+
 
 function token() {
   const t = process.env["FLY_API_TOKEN"];
