@@ -91,6 +91,36 @@ async function allocateIps(appName: string) {
   }
 }
 
+/**
+ * Reads the allocated IPs back. The allocate mutation swallows its own errors,
+ * so "flycast should work" was an assumption — this turns it into a fact the
+ * timeline can state (`flycast: present` / `absent`).
+ */
+export async function appIpSummary(appName: string): Promise<string> {
+  try {
+    const res = await fetch("https://api.fly.io/graphql", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query($name: String!) { app(name: $name) { ipAddresses { nodes { address type } } } }`,
+        variables: { name: appName },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return `ip api ${res.status}`;
+    const json = (await res.json()) as {
+      data?: { app?: { ipAddresses?: { nodes?: { address: string; type: string }[] } } };
+    };
+    const nodes = json.data?.app?.ipAddresses?.nodes ?? [];
+    const types = nodes.map((n) => String(n.type).toLowerCase());
+    const flycast = types.some((t) => t.includes("private")) ? "present" : "absent";
+    const publicIp = types.some((t) => t.includes("v4") || t === "v6") ? "present" : "absent";
+    return `flycast: ${flycast} · public IP: ${publicIp}`;
+  } catch (err) {
+    return err instanceof Error ? err.message.slice(0, 160) : "ip lookup failed";
+  }
+}
+
 
 function machineConfig(
   kind: "node" | "indexer" | "proof",
@@ -117,13 +147,13 @@ function machineConfig(
         // Chain data survives restarts and repairs, so a deployed contract
         // address stays valid.
         ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
-        // 9944 is never published publicly, but it MUST be declared as a service
-        // so the Fly proxy accepts private (flycast) traffic on that port and
-        // forwards it to the container over IPv4 — the only way the indexer can
-        // reach an IPv4-bound Substrate RPC on Fly's IPv6-only 6PN network.
+        // The RPC is published through the Fly edge on 9944 (tls + http, so the
+        // WebSocket upgrade passes through). The edge reaches the container over
+        // IPv4, which is the only thing the IPv4-bound Substrate RPC accepts —
+        // and unlike flycast it needs no private-IP allocation to work.
         services: [
           {
-            ports: [{ port: 9944, handlers: [] }],
+            ports: [{ port: 9944, handlers: ["tls", "http"] }],
             protocol: "tcp",
             internal_port: 9944,
             autostop: false,
@@ -239,12 +269,15 @@ async function ensureMachine(
 
 /** Re-applies corrected specs to an existing app and restarts each machine. */
 export async function repairMidnightStack(appName: string, region: string) {
-  // Older stacks have no private IP, so `<app>.flycast` does not resolve yet.
+  // Keeps older apps in step: public IPs for the edge-published node RPC, and a
+  // private IP so the flycast diagnostic can still be reported truthfully.
   await allocateIps(appName);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
 
-  for (const kind of ["node", "indexer", "proof"] as const) {
+  // Node and proof first, indexer LAST: the indexer only retries its node
+  // connection on boot, so it must start against an already-listening RPC.
+  for (const kind of ["node", "proof", "indexer"] as const) {
     const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
     const spec = machineConfig(kind, appName, volumeId);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -252,6 +285,10 @@ export async function repairMidnightStack(appName: string, region: string) {
     if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
+      if (kind === "node") {
+        // Give the RPC a moment to listen again before the indexer is restarted.
+        await flyOptional(`/apps/${appName}/machines/${existing.id}/wait?state=started&timeout=60`);
+      }
     } else {
       await fly(`/apps/${appName}/machines`, { method: "POST", body });
     }
@@ -462,27 +499,65 @@ export async function midnightDiagnostics(appName: string) {
     }
   }
 
+  /**
+   * The app log API only answers for org-scoped tokens; with the app-scoped
+   * token this project uses it returns 401. Say that plainly instead of
+   * printing `log api 401` as if it described the indexer.
+   */
   async function appLog(machineId: string) {
     try {
       const res = await fetch(`https://api.fly.io/api/v1/apps/${appName}/logs?instance=${machineId}`, {
         headers: { Authorization: `Bearer ${token()}` },
         signal: AbortSignal.timeout(20_000),
       });
-      if (!res.ok) return `log api ${res.status}`;
+      if (res.status === 401 || res.status === 403) return null;
+      if (!res.ok) return null;
       const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
       const lines = (json.data ?? []).map((d) => d.attributes?.message ?? "").filter(Boolean);
-      return lines.slice(-40).join("\n").slice(-2000);
-    } catch (err) {
-      return err instanceof Error ? err.message.slice(0, 200) : "log unavailable";
+      return lines.slice(-40).join("\n").slice(-2000) || null;
+    } catch {
+      return null;
     }
   }
 
+  /**
+   * Container log via exec, for images whose stdout we cannot fetch. Tries the
+   * usual log locations and reports "no log file in this image" rather than an
+   * empty string, so the timeline never implies an empty log means "healthy".
+   */
+  async function execLog(machineId: string) {
+    const out = await exec(
+      machineId,
+      `for f in /var/log/*.log /tmp/*.log; do [ -f "$f" ] && tail -c 1500 "$f"; done 2>/dev/null || true`,
+    );
+    return out || null;
+  }
+
+  /** Works on toolless images: curl → wget → nc, else say the probe cannot run. */
+  function reach(label: string, url: string, hostPort: string) {
+    return `if command -v curl >/dev/null 2>&1; then echo "${label}=$(curl -sk -m 8 -o /dev/null -w '%{http_code}' ${url})"; \
+elif command -v wget >/dev/null 2>&1; then wget -q -T 8 -O /dev/null ${url} && echo "${label}=reachable" || echo "${label}=unreachable"; \
+elif command -v nc >/dev/null 2>&1; then nc -z -w 8 ${hostPort} && echo "${label}=tcp-open" || echo "${label}=tcp-closed"; \
+else echo "${label}=probe-unavailable-in-this-image"; fi`;
+  }
+
+  const edgeHost = `${appName}.fly.dev`;
+
   return {
-    indexerLog: indexer ? await appLog(indexer.id) : null,
-    nodeLog: node ? await appLog(node.id) : null,
-    // Does the node's RPC answer over the flycast path the indexer uses?
-    nodeRpcFromNode: node ? await exec(node.id, `curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:9944/health; echo " local"; curl -s -m 8 -o /dev/null -w '%{http_code}' http://${appName}.flycast:9944/health; echo " flycast"`) : null,
-    nodeRpcFromIndexer: indexer ? await exec(indexer.id, `(command -v curl >/dev/null && curl -s -m 8 -o /dev/null -w 'flycast=%{http_code}' http://${appName}.flycast:9944/health) || echo no-curl; echo; (command -v getent >/dev/null && getent hosts ${appName}.flycast) || echo no-getent`) : null,
+    indexerLog: indexer ? ((await appLog(indexer.id)) ?? (await execLog(indexer.id))) : null,
+    nodeLog: node ? ((await appLog(node.id)) ?? (await execLog(node.id))) : null,
+    // Public IPs / flycast, read back from Fly rather than assumed.
+    ips: await appIpSummary(appName),
+    // Does the node's RPC answer locally, and through the edge the indexer dials?
+    nodeRpcFromNode: node
+      ? await exec(
+          node.id,
+          `${reach("local", "http://127.0.0.1:9944/health", "127.0.0.1 9944")}; ${reach("edge", `https://${edgeHost}:9944/health`, `${edgeHost} 9944`)}`,
+        )
+      : null,
+    nodeRpcFromIndexer: indexer
+      ? await exec(indexer.id, reach("edge", `https://${edgeHost}:9944/health`, `${edgeHost} 9944`))
+      : null,
     machines: machines.map((m) => ({ name: m.name, state: m.state, ...exitSummary(m) })),
   };
 }

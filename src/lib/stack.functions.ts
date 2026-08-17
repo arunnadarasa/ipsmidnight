@@ -458,9 +458,10 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
 
 /**
 
- * Repairs only the Midnight half: allocates the private (flycast) IP, re-applies
- * the node/indexer/proof specs and restarts those machines. The Identus machines
- * are never touched, so a healthy agent and its database stay up.
+ * Repairs only the Midnight half: re-allocates the app IPs, republishes the
+ * node's RPC through the Fly edge, then restarts node → proof → indexer so the
+ * indexer boots against a listening RPC. The Identus machines are never touched,
+ * so a healthy agent and its database stay up.
  */
 export const repairMidnightOnly = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -489,7 +490,7 @@ export const repairMidnightOnly = createServerFn({ method: "POST" })
     await supabase.from("activity_log").insert({
       user_id: userId,
       kind: "stack.repaired",
-      summary: `Repaired Midnight stack for ${data.appPrefix} (indexer → node RPC over flycast)`,
+      summary: `Repaired Midnight stack for ${data.appPrefix} (indexer → node RPC over the Fly edge)`,
       metadata: { appPrefix: data.appPrefix, scope: "midnight" } as never,
     });
 
