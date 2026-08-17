@@ -46,7 +46,9 @@ export function stackUrls(appName: string): StackUrls {
     indexerUrl: `https://${host}/api/v4/graphql`,
     indexerWsUrl: `wss://${host}/api/v4/graphql/ws`,
     proofUrl: `https://${host}:6300`,
-    nodeUrl: `wss://${host}:9944`,
+    // The node's RPC is 6PN-internal only (no public port) — reachable from
+    // other Fly apps and from a one-shot deploy machine on the same network.
+    nodeUrl: `ws://midnight-node.process.${appName}.internal:9944`,
   };
 }
 
