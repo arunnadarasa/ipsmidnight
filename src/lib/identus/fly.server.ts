@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
+  AGENT_INIT_EXEC,
+  AGENT_LOG_PATH,
   IDENTUS_DB,
   IDENTUS_IMAGES,
   JAVA_TOOL_OPTIONS,
@@ -8,6 +10,7 @@ import {
   identusStackUrls,
   type IdentusStackUrls,
 } from "./fly-shared";
+
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
