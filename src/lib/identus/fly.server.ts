@@ -110,7 +110,20 @@ export function mintAdminKey() {
 
 type MachineKind = "postgres" | "prism-node" | "cloud-agent";
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
+/**
+ * With `DEFAULT_WALLET_ENABLED` + postgres secret storage the agent needs a
+ * 32-byte hex seed to initialise the default wallet's secret storage; without it
+ * boot aborts right after the HTTP/DIDComm endpoints are logged. Derived from
+ * the stored admin key so it stays stable across repairs and never needs its own
+ * column (a changed seed would invalidate every already-published DID).
+ */
+export async function walletSeedFrom(adminKey: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ips-wallet-seed:${adminKey}`));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function machineSpec(kind: MachineKind, appName: string, adminKey: string, walletSeed: string) {
+
   const pgHost = `identus-postgres.process.${appName}.internal`;
   const urls = identusStackUrls(appName);
 
