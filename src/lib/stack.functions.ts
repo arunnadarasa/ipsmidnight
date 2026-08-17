@@ -128,14 +128,18 @@ export const checkFullStack = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .eq("app_prefix", data.appPrefix)
       .maybeSingle();
-    const identusMachines = await identusMachineStates(identusUrls.appName);
+    // Each remote read is individually fault-tolerant: one slow or failing Fly
+    // call must not take down the whole check (that is what left the timeline
+    // spinning with no error).
+    const identusMachines = await identusMachineStates(identusUrls.appName).catch(() => []);
     const identusHealth = conn?.api_key
-      ? await probeAgent({ baseUrl: identusUrls.agentUrl, apiKey: conn.api_key })
+      ? await probeAgent({ baseUrl: identusUrls.agentUrl, apiKey: conn.api_key }).catch(() => ({ probes: [], ready: false }))
       : { probes: [], ready: false };
     const identusStatus = identusHealth.ready ? "ready" : identusMachines.length ? "provisioning" : "unknown";
     // Only pull logs when something is wrong — that is the one moment the
     // stack trace matters, and it keeps the happy-path check fast.
-    const identusLog = identusHealth.ready ? null : await agentLogTail(identusUrls.appName);
+    const identusLog = identusHealth.ready ? null : await agentLogTail(identusUrls.appName).catch(() => null);
+
     await supabase
       .from("fly_deployments")
       .update({ status: identusStatus, machines: identusMachines as never })
