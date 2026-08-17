@@ -1,10 +1,15 @@
 /** Constants shared by the Identus Fly provisioner and the console UI. */
 
 export const IDENTUS_IMAGES = {
-  postgres: "docker.io/postgres:16-alpine",
+  // Postgres 13 — the version upstream's own compose pins. The agent's pollux
+  // migration V21 declares an unquoted `format` column, and from PG 15/16 on
+  // FORMAT is reserved in that position (SQL/JSON `… FORMAT JSON`), so the
+  // migration dies with `syntax error at or near "format"`.
+  postgres: "docker.io/postgres:13-alpine",
   prismNode: "docker.io/identus/prism-node:2.5.0",
   cloudAgent: "docker.io/identus/identus-cloud-agent:1.40.0",
 } as const;
+
 
 export const IDENTUS_DB = {
   user: "postgres",
