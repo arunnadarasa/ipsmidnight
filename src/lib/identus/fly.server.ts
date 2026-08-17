@@ -49,6 +49,11 @@ function exitSummary(m: FlyMachine) {
 }
 
 
+/** Read-only callers use this to degrade gracefully instead of throwing. */
+export function flyConfigured() {
+  return Boolean(process.env["FLY_API_TOKEN"]);
+}
+
 function token() {
   const t = process.env["FLY_API_TOKEN"];
   if (!t) throw new Error("FLY_API_TOKEN is not configured for this project.");
@@ -335,7 +340,8 @@ export async function provisionIdentusStack(input: {
 }
 
 export async function identusMachineStates(appName: string) {
-
+  // No Fly token: there is nothing to read, and throwing here blanks the page.
+  if (!flyConfigured()) return [];
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   return machines.map((m) => ({
     name: m.name,
@@ -408,6 +414,7 @@ function pickErrorText(raw: string): string | null {
  * instead of null so the UI never shows a silent spinner.
  */
 export async function agentLogTail(appName: string): Promise<string | null> {
+  if (!flyConfigured()) return null;
   try {
     const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
     const agent = machines.find((m) => m.name === "identus-cloud-agent");
@@ -464,6 +471,7 @@ export async function agentLogTail(appName: string): Promise<string | null> {
 
 
 export async function identusDiagnostics(appName: string) {
+  if (!flyConfigured()) return { machines: [] as never[], agentLog: null, dbProbe: null } as never;
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const rows = [] as {
     name: string;
