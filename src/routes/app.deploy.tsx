@@ -22,6 +22,7 @@ import {
   provisionFullStack,
   checkFullStack,
   destroyFullStack,
+  repairFullStack,
   listStacks,
 } from "@/lib/stack.functions";
 import { StackTimeline } from "@/components/deploy/StackTimeline";
