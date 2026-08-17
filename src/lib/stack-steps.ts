@@ -107,7 +107,11 @@ export function identusSteps(input: {
 }): StackStep[] {
   const { appName, machines, probes, logTail } = input;
   const created = Boolean(appName);
-  const agentUp = machines?.find((m) => m.name === "identus-cloud-agent")?.state === "started";
+  const agentStep = machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start");
+  // While the agent is crash-looping, the health probes can only ever spin — keep
+  // them pending so the failed boot step is the one thing the user reads.
+  const bootFailed = agentStep.state === "failed";
+  const agentUp = !bootFailed && machines?.find((m) => m.name === "identus-cloud-agent")?.state === "started";
 
   const steps: StackStep[] = [
     {
@@ -116,21 +120,19 @@ export function identusSteps(input: {
       state: created ? "done" : "active",
       ...(appName ? { value: appName } : {}),
     },
-    machineStep("pg", "Postgres started", machines, "identus-postgres", "creates four databases"),
+    machineStep("pg", "Postgres started", machines, "identus-postgres", "creates four databases and their app roles"),
     machineStep("prism", "PRISM node booting", machines, "identus-prism-node"),
-    withLog(
-      machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start"),
-      logTail,
-    ),
+    withLog(agentStep, logTail),
     withLog(
       probeStep("system", "Agent health: system", probes, "system", agentUp, "first boot migrates four databases, ~4 min"),
-      logTail,
+      bootFailed ? null : logTail,
     ),
 
     probeStep("did-registrar", "Agent health: DID registrar", probes, "did-registrar", agentUp),
     probeStep("issuance", "Agent health: issuance", probes, "issuance", agentUp),
     probeStep("connections", "Agent health: connections", probes, "connections", agentUp),
   ];
+
   return normalize(steps);
 }
 

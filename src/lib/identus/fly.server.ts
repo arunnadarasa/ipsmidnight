@@ -113,19 +113,8 @@ export function mintAdminKey() {
 
 type MachineKind = "postgres" | "prism-node" | "cloud-agent";
 
-/**
- * With `DEFAULT_WALLET_ENABLED` + postgres secret storage the agent needs a
- * 32-byte hex seed to initialise the default wallet's secret storage; without it
- * boot aborts right after the HTTP/DIDComm endpoints are logged. Derived from
- * the stored admin key so it stays stable across repairs and never needs its own
- * column (a changed seed would invalidate every already-published DID).
- */
-export async function walletSeedFrom(adminKey: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ips-wallet-seed:${adminKey}`));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-}
+function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string, walletSeed: string) {
 
   const pgHost = `identus-postgres.process.${appName}.internal`;
   const urls = identusStackUrls(appName);
@@ -194,18 +183,11 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         AGENT_DB_NAME: "agent",
         AGENT_DB_USER: IDENTUS_DB.user,
         AGENT_DB_PASSWORD: IDENTUS_DB.password,
-        // The agent's own Flyway/secret-storage layer reads the plain POSTGRES_*
-        // group; without it, secret storage initialisation fails on boot.
-        POSTGRES_HOST: pgHost,
-        POSTGRES_PORT: "5432",
-        POSTGRES_DB: "agent",
-        POSTGRES_USER: IDENTUS_DB.user,
-        POSTGRES_PASSWORD: IDENTUS_DB.password,
         PRISM_NODE_HOST: `identus-prism-node.process.${appName}.internal`,
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
         DEFAULT_WALLET_ENABLED: "true",
-        DEFAULT_WALLET_SEED: walletSeed,
+
         DEFAULT_WALLET_AUTH_API_KEY: adminKey,
         ADMIN_TOKEN: adminKey,
         API_KEY_ENABLED: "true",
@@ -268,7 +250,7 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
 }
 
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
-  const spec = machineSpec(kind, appName, adminKey, await walletSeedFrom(adminKey));
+  const spec = machineSpec(kind, appName, adminKey);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -281,18 +263,27 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
 
 /**
  * Re-applies the corrected machine specs (process-group metadata, env, ports) to
- * an already-provisioned app and restarts each machine. Idempotent; the Postgres
- * data and DID state are untouched.
+ * an already-provisioned app and restarts each machine.
+ *
+ * The Postgres machine is *destroyed and recreated* rather than restarted: its
+ * init script only runs against an empty data directory, so an existing machine
+ * would keep missing the `<db>-application-user` roles the agent's migrations
+ * grant to. Only agent-internal state lives there (no patient summaries or
+ * issued credentials), and the Midnight app is never touched by this call.
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
-  const walletSeed = await walletSeedFrom(adminKey);
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey, walletSeed);
+    const spec = machineSpec(kind, appName, adminKey);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
-    if (existing) {
+    const recreate = kind === "postgres";
+    if (existing && recreate) {
+      // 404 means it is already gone — either way we continue to the create below.
+      await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
+      await fly(`/apps/${appName}/machines`, { method: "POST", body });
+    } else if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
     } else {
@@ -302,6 +293,7 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
   }
   return { appName, repaired };
 }
+
 
 export type IdentusProvisionResult = IdentusStackUrls & {
   created: boolean;
@@ -343,26 +335,43 @@ export async function identusMachineStates(appName: string) {
   }));
 }
 
-/** Picks the most diagnostic slice out of a raw log blob. */
+/**
+ * Picks the most diagnostic slice out of a raw log blob.
+ *
+ * Prefers a line that names the actual cause (a Postgres `ERROR:`, a `Caused by`,
+ * a "does not exist" / connection failure) over a generic ZIO wrapper or a bare
+ * `at …` stack frame — without this, a cause like
+ * `ERROR: role "pollux-application-user" does not exist` gets buried under the
+ * frames that follow it.
+ */
 function pickErrorText(raw: string): string | null {
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((l) => !/^at\s/.test(l));
   if (!lines.length) return null;
-  const re = /error|exception|caused by|fatal|failed|refused|unknownhost|denied|timeout|no such/i;
-  let idx = -1;
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line && re.test(line)) {
-      idx = i;
-      break;
+
+  const strong = /\bERROR:|caused by|does not exist|already exists|denied|refused|unknownhost|no such|out of memory|fatal/i;
+  const weak = /error|exception|failed|timeout/i;
+
+  const findLast = (re: RegExp) => {
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i];
+      if (line && re.test(line)) return i;
     }
-  }
+    return -1;
+  };
+
+  const idx = (() => {
+    const s = findLast(strong);
+    return s >= 0 ? s : findLast(weak);
+  })();
 
   const slice = idx >= 0 ? lines.slice(idx, idx + 4) : lines.slice(-4);
   return slice.join(" | ").slice(0, 700);
 }
+
 
 /**
  * The agent's own error text. The Machines API exposes no log endpoint, so the
@@ -521,7 +530,7 @@ export async function repairAgentEndpoints(appName: string, adminKey: string, re
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const agent = machines.find((m) => m.name === "identus-cloud-agent");
   if (!agent) throw new Error("No cloud-agent machine on this app — provision it first.");
-  const spec = machineSpec("cloud-agent", appName, adminKey, await walletSeedFrom(adminKey));
+  const spec = machineSpec("cloud-agent", appName, adminKey);
   await fly(`/apps/${appName}/machines/${agent.id}`, {
     method: "POST",
     body: JSON.stringify({ name: spec.name, region, config: spec.config }),

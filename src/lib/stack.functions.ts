@@ -272,6 +272,57 @@ export const repairFullStack = createServerFn({ method: "POST" })
     };
   });
 
+/**
+ * Repairs only the Identus half: reapplies the cloud-agent/PRISM config and
+ * recreates the Identus Postgres machine so its init script runs again and
+ * creates the `<db>-application-user` roles the agent's migrations require.
+ * The Midnight machines are never touched, so a healthy chain keeps producing
+ * blocks while the agent is fixed.
+ */
+export const repairIdentusOnly = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; region?: string }) => input)
+  .handler(async ({ data, context }) => {
+    const { repairIdentusStack } = await import("@/lib/identus/fly.server");
+    const { supabase, userId } = context;
+
+    const { data: rows } = await supabase
+      .from("fly_deployments")
+      .select("region")
+      .eq("user_id", userId)
+      .eq("kind", "identus")
+      .eq("app_prefix", data.appPrefix);
+    const region = data.region ?? rows?.[0]?.region ?? "lhr";
+
+    const { data: conn } = await supabase
+      .from("agent_connections")
+      .select("api_key")
+      .eq("user_id", userId)
+      .eq("app_prefix", data.appPrefix)
+      .maybeSingle();
+    if (!conn?.api_key) throw new Error("No stored admin key for this Identus stack — reprovision instead.");
+
+    await repairIdentusStack(`${data.appPrefix}-identus`, conn.api_key, region);
+
+    await supabase
+      .from("fly_deployments")
+      .update({ status: "provisioning", last_error: null })
+      .eq("user_id", userId)
+      .eq("kind", "identus")
+      .eq("app_prefix", data.appPrefix);
+
+    await supabase.from("activity_log").insert({
+      user_id: userId,
+      kind: "stack.repaired",
+      summary: `Repaired Identus agent for ${data.appPrefix} (database app roles recreated)`,
+      metadata: { appPrefix: data.appPrefix, scope: "identus" } as never,
+    });
+
+    return { ok: true };
+  });
+
+
+
 
 /** Lists the existing IPS stack deployments for the signed-in user (both kinds). */
 export const listStacks = createServerFn({ method: "GET" })
