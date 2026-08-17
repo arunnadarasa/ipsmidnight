@@ -43,7 +43,8 @@ const INDEXER_WS = INDEXER.replace(/^http/, "ws") + "/ws";
 const GENESIS_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
 const PRIVATE_STATE_ID = "ips-anchor-registry";
 const PRIVATE_STATE_STORE = "ips-midnight-level-db";
-const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-2026";
+// midnight-js-utils enforces >= 16 characters and mixed character classes.
+const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-Registry-2026";
 const DEPLOYER_SECRET_HEX = "11".repeat(32);
 
 // The Midnight JS SDK is ESM-only and heavy; it is installed in a scratch
