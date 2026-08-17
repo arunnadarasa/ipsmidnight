@@ -252,6 +252,8 @@ function DeployConsole() {
               repairLoading={repairMut.isPending}
               onRepairIdentus={() => repairIdentusMut.mutate()}
               repairIdentusLoading={repairIdentusMut.isPending}
+              onReconnect={() => reconnectMut.mutate()}
+              reconnectLoading={reconnectMut.isPending}
 
             />
           ) : null}
@@ -381,6 +383,8 @@ function StackDetail({
   repairLoading,
   onRepairIdentus,
   repairIdentusLoading,
+  onReconnect,
+  reconnectLoading,
 }: {
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
@@ -393,6 +397,8 @@ function StackDetail({
   repairLoading: boolean;
   onRepairIdentus: () => void;
   repairIdentusLoading: boolean;
+  onReconnect: () => void;
+  reconnectLoading: boolean;
 
 }) {
   const identus = readiness?.identus;
@@ -426,6 +432,14 @@ function StackDetail({
             )}
             Fix agent DB
           </Button>
+          <Button variant="outline" size="sm" onClick={onReconnect} disabled={reconnectLoading}>
+            {reconnectLoading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wrench className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Reconnect
+          </Button>
 
           <Button variant="ghost" size="sm" onClick={onDestroy} disabled={destroyLoading} className="text-destructive hover:text-destructive">
             {destroyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
@@ -453,6 +467,7 @@ function StackDetail({
             machines: identus?.machines,
             probes: identus?.health.probes,
             logTail: identus?.logTail ?? null,
+            hasKey: identus?.hasKey ?? true,
           })}
           startedAt={stack.created_at}
           regionLabel={`Region ${stack.region}`}
