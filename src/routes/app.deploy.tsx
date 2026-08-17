@@ -40,6 +40,7 @@ type ReadinessResult = {
     status: string;
     ready: boolean;
     logTail?: string | null;
+    hasKey?: boolean;
   };
   midnight: {
     urls: { appName: string; indexerUrl: string; indexerWsUrl: string; proofUrl: string; nodeUrl: string };
