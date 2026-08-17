@@ -50,7 +50,14 @@ type ReadinessResult = {
     probes: { indexer: { ok: boolean; status: number | null; detail: string }; proof: { ok: boolean; status: number | null; detail: string }; blockHeight: number | null };
     status: string;
     ready: boolean;
+    diagnostics?: {
+      indexerLog: string | null;
+      nodeLog: string | null;
+      nodeRpcFromNode: string | null;
+      nodeRpcFromIndexer: string | null;
+    } | null;
   };
+
   allReady: boolean;
   appPrefix: string;
 };
@@ -526,7 +533,9 @@ function StackDetail({
             appName: midnight?.urls.appName ?? `${stack.appPrefix}-midnight`,
             machines: midnight?.machines,
             probes: midnight?.probes,
+            diagnostics: midnight?.diagnostics ?? null,
           })}
+
           startedAt={stack.created_at}
           regionLabel={`Region ${stack.region}`}
           onRetry={onCheck}

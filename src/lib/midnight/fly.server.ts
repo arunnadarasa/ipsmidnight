@@ -412,3 +412,50 @@ export async function verifyAnchorOnChain(input: {
     };
   }
 }
+
+/**
+ * Why the indexer has no blocks: reads the indexer's own log and probes the node
+ * RPC from inside the node machine (which ships curl). Without this the empty
+ * chain is invisible — the GraphQL endpoint answers happily either way.
+ */
+export async function midnightDiagnostics(appName: string) {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const indexer = machines.find((m) => m.name === "midnight-indexer");
+  const node = machines.find((m) => m.name === "midnight-node");
+
+  async function exec(machineId: string, command: string) {
+    try {
+      const res = await flyOptional<{ exit_code?: number; stdout?: string; stderr?: string }>(
+        `/apps/${appName}/machines/${machineId}/exec`,
+        { method: "POST", body: JSON.stringify({ command: ["/bin/sh", "-c", command], timeout: 25 }) },
+      );
+      return `${res?.stdout ?? ""}${res?.stderr ?? ""}`.trim().slice(0, 1200);
+    } catch (err) {
+      return err instanceof Error ? err.message.slice(0, 300) : "exec failed";
+    }
+  }
+
+  async function appLog(machineId: string) {
+    try {
+      const res = await fetch(`https://api.fly.io/api/v1/apps/${appName}/logs?instance=${machineId}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) return `log api ${res.status}`;
+      const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
+      const lines = (json.data ?? []).map((d) => d.attributes?.message ?? "").filter(Boolean);
+      return lines.slice(-40).join("\n").slice(-2000);
+    } catch (err) {
+      return err instanceof Error ? err.message.slice(0, 200) : "log unavailable";
+    }
+  }
+
+  return {
+    indexerLog: indexer ? await appLog(indexer.id) : null,
+    nodeLog: node ? await appLog(node.id) : null,
+    // Does the node's RPC answer over the flycast path the indexer uses?
+    nodeRpcFromNode: node ? await exec(node.id, `curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:9944/health; echo " local"; curl -s -m 8 -o /dev/null -w '%{http_code}' http://${appName}.flycast:9944/health; echo " flycast"`) : null,
+    nodeRpcFromIndexer: indexer ? await exec(indexer.id, `(command -v curl >/dev/null && curl -s -m 8 -o /dev/null -w 'flycast=%{http_code}' http://${appName}.flycast:9944/health) || echo no-curl; echo; (command -v getent >/dev/null && getent hosts ${appName}.flycast) || echo no-getent`) : null,
+    machines: machines.map((m) => ({ name: m.name, state: m.state, ...exitSummary(m) })),
+  };
+}

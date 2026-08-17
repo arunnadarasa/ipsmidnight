@@ -113,8 +113,9 @@ export const checkFullStack = createServerFn({ method: "POST" })
     const { identusMachineStates, agentLogTail } = await import("@/lib/identus/fly.server");
     const { probeAgent } = await import("@/lib/identus/cloud-agent.server");
     const { identusStackUrls } = await import("@/lib/identus/fly-shared");
-    const { machineStates, probeStack } = await import("@/lib/midnight/fly.server");
+    const { machineStates, probeStack, midnightDiagnostics } = await import("@/lib/midnight/fly.server");
     const { stackUrls } = await import("@/lib/midnight/shared");
+
     const { supabase, userId } = context;
 
     const identusUrls = identusStackUrls(`${data.appPrefix}-identus`);
@@ -153,6 +154,10 @@ export const checkFullStack = createServerFn({ method: "POST" })
     const midnightProbes = await probeStack({ indexerUrl: midnightUrls.indexerUrl, proofUrl: midnightUrls.proofUrl });
     const midnightReady = midnightProbes.indexer.ok && midnightProbes.proof.ok;
     const midnightStatus = midnightReady ? "ready" : midnightMachines.length ? "provisioning" : "unknown";
+    // Only when something is wrong: the indexer log plus the node-RPC reachability
+    // check are the only signals that explain an indexer with zero blocks.
+    const midnightDiag = midnightReady ? null : await midnightDiagnostics(midnightUrls.appName).catch(() => null);
+
     await supabase
       .from("fly_deployments")
       .update({
@@ -179,7 +184,7 @@ export const checkFullStack = createServerFn({ method: "POST" })
         // to say "reconnect" rather than show a spinner that never resolves.
         hasKey: Boolean(conn?.api_key),
       },
-      midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady },
+      midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady, diagnostics: midnightDiag },
       allReady: identusHealth.ready && midnightReady,
       appPrefix: data.appPrefix,
     };

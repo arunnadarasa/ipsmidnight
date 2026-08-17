@@ -176,11 +176,21 @@ export function midnightSteps(input: {
         blockHeight: number | null;
       }
     | undefined;
+  /** Indexer log / node-RPC reachability, surfaced on the sync step when it stalls. */
+  diagnostics?:
+    | {
+        indexerLog: string | null;
+        nodeRpcFromNode: string | null;
+        nodeRpcFromIndexer: string | null;
+      }
+    | null
+    | undefined;
 }): StackStep[] {
-  const { appName, machines, probes } = input;
+  const { appName, machines, probes, diagnostics } = input;
   const created = Boolean(appName);
   const nodeUp = machines?.find((m) => m.name === "midnight-node")?.state === "started";
   const indexerUp = machines?.find((m) => m.name === "midnight-indexer")?.state === "started";
+
 
   const steps: StackStep[] = [
     {
@@ -197,12 +207,24 @@ export function midnightSteps(input: {
       label: "Indexer syncing",
       state: probes?.indexer.ok ? "done" : indexerUp || nodeUp ? "active" : "pending",
       ...(probes?.blockHeight != null ? { value: `block ${probes.blockHeight}` } : {}),
-      ...(probes && !probes.indexer.ok && probes.indexer.detail ? { detail: probes.indexer.detail } : {}),
+      ...(() => {
+        if (probes?.indexer.ok) return {};
+        const diag = [
+          diagnostics?.nodeRpcFromIndexer ? `indexer→node: ${diagnostics.nodeRpcFromIndexer}` : null,
+          diagnostics?.nodeRpcFromNode ? `node RPC: ${diagnostics.nodeRpcFromNode}` : null,
+          diagnostics?.indexerLog ? `indexer log: ${diagnostics.indexerLog.slice(-600)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" — ");
+        const detail = [probes?.indexer.detail, diag].filter(Boolean).join(" — ");
+        return detail ? { detail } : {};
+      })(),
       hint:
         probes && !probes.indexer.ok && probes.blockHeight === null && indexerUp && nodeUp
           ? "the indexer answers but has no blocks — run Repair to reconnect it to the node RPC"
           : "ingests blocks from the node over the private network",
     },
+
 
     {
       key: "proof-ready",
