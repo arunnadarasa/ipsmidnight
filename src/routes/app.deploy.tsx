@@ -399,6 +399,7 @@ function StackDetail({
             appName: identus?.urls.appName ?? `${stack.appPrefix}-identus`,
             machines: identus?.machines,
             probes: identus?.health.probes,
+            logTail: identus?.logTail ?? null,
           })}
           startedAt={stack.created_at}
           regionLabel={`Region ${stack.region}`}
