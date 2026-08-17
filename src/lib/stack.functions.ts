@@ -329,8 +329,13 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
       kind: "stack.repaired",
       summary: `Repaired Identus agent for ${data.appPrefix} (database app roles recreated)`,
       metadata: { appPrefix: data.appPrefix, scope: "identus" } as never,
+    });
+
+    return { ok: true };
+  });
 
 /**
+
  * Repairs only the Midnight half: allocates the private (flycast) IP, re-applies
  * the node/indexer/proof specs and restarts those machines. The Identus machines
  * are never touched, so a healthy agent and its database stay up.
