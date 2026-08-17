@@ -154,8 +154,9 @@ export const checkFullStack = createServerFn({ method: "POST" })
     }
 
     // Midnight half
-    const midnightMachines = await machineStates(midnightUrls.appName);
+    const midnightMachines = await machineStates(midnightUrls.appName).catch(() => []);
     const midnightProbes = await probeStack({ indexerUrl: midnightUrls.indexerUrl, proofUrl: midnightUrls.proofUrl });
+
     const midnightReady = midnightProbes.indexer.ok && midnightProbes.proof.ok;
     const midnightStatus = midnightReady ? "ready" : midnightMachines.length ? "provisioning" : "unknown";
     // Only when something is wrong: the indexer log plus the node-RPC reachability
