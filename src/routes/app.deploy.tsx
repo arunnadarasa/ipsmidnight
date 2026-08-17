@@ -362,6 +362,15 @@ function StackDetail({
           readyTo={allReady ? "/app/identus" : null}
           readyLabel="Publish DID & issue"
           machines={identus?.machines}
+          steps={identusSteps({
+            appName: identus?.urls.appName ?? `${stack.appPrefix}-identus`,
+            machines: identus?.machines,
+            probes: identus?.health.probes,
+          })}
+          startedAt={stack.created_at}
+          regionLabel={`Region ${stack.region}`}
+          onRetry={onCheck}
+          retrying={checking}
         />
         <HalfCard
           title="Midnight Undeployed"
@@ -375,6 +384,15 @@ function StackDetail({
           readyTo={allReady ? "/app/midnight" : null}
           readyLabel="Deploy contract & anchor"
           machines={midnight?.machines}
+          steps={midnightSteps({
+            appName: midnight?.urls.appName ?? `${stack.appPrefix}-midnight`,
+            machines: midnight?.machines,
+            probes: midnight?.probes,
+          })}
+          startedAt={stack.created_at}
+          regionLabel={`Region ${stack.region}`}
+          onRetry={onCheck}
+          retrying={checking}
         />
       </div>
 
