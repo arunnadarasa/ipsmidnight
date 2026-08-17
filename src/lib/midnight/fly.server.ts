@@ -91,6 +91,36 @@ async function allocateIps(appName: string) {
   }
 }
 
+/**
+ * Reads the allocated IPs back. The allocate mutation swallows its own errors,
+ * so "flycast should work" was an assumption — this turns it into a fact the
+ * timeline can state (`flycast: present` / `absent`).
+ */
+export async function appIpSummary(appName: string): Promise<string> {
+  try {
+    const res = await fetch("https://api.fly.io/graphql", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query($name: String!) { app(name: $name) { ipAddresses { nodes { address type } } } }`,
+        variables: { name: appName },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return `ip api ${res.status}`;
+    const json = (await res.json()) as {
+      data?: { app?: { ipAddresses?: { nodes?: { address: string; type: string }[] } } };
+    };
+    const nodes = json.data?.app?.ipAddresses?.nodes ?? [];
+    const types = nodes.map((n) => String(n.type).toLowerCase());
+    const flycast = types.some((t) => t.includes("private")) ? "present" : "absent";
+    const publicIp = types.some((t) => t.includes("v4") || t === "v6") ? "present" : "absent";
+    return `flycast: ${flycast} · public IP: ${publicIp}`;
+  } catch (err) {
+    return err instanceof Error ? err.message.slice(0, 160) : "ip lookup failed";
+  }
+}
+
 
 function machineConfig(
   kind: "node" | "indexer" | "proof",
