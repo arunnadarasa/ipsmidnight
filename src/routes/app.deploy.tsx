@@ -319,6 +319,8 @@ function StackDetail({
   onCheck,
   onDestroy,
   destroyLoading,
+  onRepair,
+  repairLoading,
 }: {
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
@@ -327,6 +329,8 @@ function StackDetail({
   onCheck: () => void;
   onDestroy: () => void;
   destroyLoading: boolean;
+  onRepair: () => void;
+  repairLoading: boolean;
 }) {
   const identus = readiness?.identus;
   const midnight = readiness?.midnight;
@@ -342,10 +346,14 @@ function StackDetail({
         <p className="text-xs text-muted-foreground sm:truncate">
           Region {stack.region} · provisioned {new Date(stack.created_at).toLocaleString()}
         </p>
-        <div className="flex items-center gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">
+        <div className="flex flex-wrap items-center gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">
           <Button variant="outline" size="sm" onClick={onCheck} disabled={checking}>
             {checking ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
             Check
+          </Button>
+          <Button variant="outline" size="sm" onClick={onRepair} disabled={repairLoading}>
+            {repairLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wrench className="mr-1.5 h-3.5 w-3.5" />}
+            Repair config
           </Button>
           <Button variant="ghost" size="sm" onClick={onDestroy} disabled={destroyLoading} className="text-destructive hover:text-destructive">
             {destroyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
@@ -353,6 +361,7 @@ function StackDetail({
           </Button>
         </div>
       </div>
+
 
       <div className="grid gap-4 lg:grid-cols-2">
         <HalfCard
