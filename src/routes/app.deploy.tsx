@@ -80,6 +80,7 @@ function DeployConsole() {
   const provision = useServerFn(provisionFullStack);
   const check = useServerFn(checkFullStack);
   const destroy = useServerFn(destroyFullStack);
+  const repair = useServerFn(repairFullStack);
 
   const [prefix, setPrefix] = useState("");
   const [label, setLabel] = useState("");
