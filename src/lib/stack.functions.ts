@@ -155,10 +155,17 @@ export const checkFullStack = createServerFn({ method: "POST" })
     const midnightStatus = midnightReady ? "ready" : midnightMachines.length ? "provisioning" : "unknown";
     await supabase
       .from("fly_deployments")
-      .update({ status: midnightStatus, machines: midnightMachines as never })
+      .update({
+        status: midnightStatus,
+        machines: midnightMachines as never,
+        // Keeps the stored RPC address in step with the current wiring (the node
+        // RPC moved from the 6PN name to the proxy-backed flycast address).
+        node_url: midnightUrls.nodeUrl,
+      })
       .eq("user_id", userId)
       .eq("kind", "midnight")
       .eq("app_prefix", data.appPrefix);
+
 
     return {
       identus: {
