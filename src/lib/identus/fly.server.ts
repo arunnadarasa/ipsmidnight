@@ -263,18 +263,27 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
 
 /**
  * Re-applies the corrected machine specs (process-group metadata, env, ports) to
- * an already-provisioned app and restarts each machine. Idempotent; the Postgres
- * data and DID state are untouched.
+ * an already-provisioned app and restarts each machine.
+ *
+ * The Postgres machine is *destroyed and recreated* rather than restarted: its
+ * init script only runs against an empty data directory, so an existing machine
+ * would keep missing the `<db>-application-user` roles the agent's migrations
+ * grant to. Only agent-internal state lives there (no patient summaries or
+ * issued credentials), and the Midnight app is never touched by this call.
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
     const spec = machineSpec(kind, appName, adminKey);
-
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
-    if (existing) {
+    const recreate = kind === "postgres";
+    if (existing && recreate) {
+      // 404 means it is already gone — either way we continue to the create below.
+      await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
+      await fly(`/apps/${appName}/machines`, { method: "POST", body });
+    } else if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
     } else {
@@ -284,6 +293,7 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
   }
   return { appName, repaired };
 }
+
 
 export type IdentusProvisionResult = IdentusStackUrls & {
   created: boolean;
