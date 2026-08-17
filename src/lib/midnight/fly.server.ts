@@ -124,8 +124,12 @@ function machineConfig(
         image: IMAGES.indexer,
         env: {
           ...INDEXER_ENV,
-          APP__INFRA__NODE__URL: `ws://midnight-node.process.${appName}.internal:9944`,
+          APP__INFRA__NODE__URL: nodeRpcWsUrl(appName),
+          // Indexer 4.3.x reads the SPO node separately; upstream points both
+          // at the same node and omitting it stops the chain indexer booting.
+          APP__INFRA__SPO_NODE__URL: nodeRpcWsUrl(appName),
         },
+
         guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
         services: [
           {
