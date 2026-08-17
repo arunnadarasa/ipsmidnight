@@ -37,6 +37,7 @@ type ReadinessResult = {
     health: { probes: { name: string; ok: boolean; status: number | null; detail: string }[]; ready: boolean };
     status: string;
     ready: boolean;
+    logTail?: string | null;
   };
   midnight: {
     urls: { appName: string; indexerUrl: string; indexerWsUrl: string; proofUrl: string; nodeUrl: string };
