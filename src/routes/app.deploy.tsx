@@ -432,6 +432,11 @@ function HalfCard({
   readyTo,
   readyLabel,
   machines,
+  steps,
+  startedAt,
+  regionLabel,
+  onRetry,
+  retrying,
 }: {
   title: string;
   subtitle: string;
@@ -444,6 +449,11 @@ function HalfCard({
   readyTo?: string | null | undefined;
   readyLabel: string;
   machines?: MachineLike[] | undefined;
+  steps: StackStep[];
+  startedAt: string | null;
+  regionLabel?: string | null;
+  onRetry?: () => void;
+  retrying?: boolean;
 }) {
   const tone = ready ? "text-success" : status === "error" ? "text-destructive" : "text-muted-foreground";
   return (
