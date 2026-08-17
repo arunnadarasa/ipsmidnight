@@ -194,6 +194,75 @@ export const destroyFullStack = createServerFn({ method: "POST" })
     return { destroyed: true };
   });
 
+/**
+ * Re-applies the corrected machine config to an already-provisioned stack and
+ * restarts every machine. Fixes stacks created before process-group metadata
+ * and the IPv6 node RPC binding existed — data is preserved.
+ */
+export const repairFullStack = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; region?: string }) => input)
+  .handler(async ({ data, context }) => {
+    const { repairIdentusStack } = await import("@/lib/identus/fly.server");
+    const { repairMidnightStack } = await import("@/lib/midnight/fly.server");
+    const { supabase, userId } = context;
+
+    const { data: rows } = await supabase
+      .from("fly_deployments")
+      .select("kind,region")
+      .eq("user_id", userId)
+      .eq("app_prefix", data.appPrefix);
+    const region = data.region ?? rows?.[0]?.region ?? "lhr";
+
+    const { data: conn } = await supabase
+      .from("agent_connections")
+      .select("api_key")
+      .eq("user_id", userId)
+      .eq("app_prefix", data.appPrefix)
+      .maybeSingle();
+
+    const results = await Promise.allSettled([
+      conn?.api_key
+        ? repairIdentusStack(`${data.appPrefix}-identus`, conn.api_key, region)
+        : Promise.reject(new Error("No stored admin key for this Identus stack — reprovision instead.")),
+      repairMidnightStack(`${data.appPrefix}-midnight`, region),
+    ]);
+
+    const identus = results[0];
+    const midnight = results[1];
+    const errorOf = (r: PromiseSettledResult<unknown>) =>
+      r.status === "rejected" ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : null;
+
+    await supabase
+      .from("fly_deployments")
+      .update({ status: "provisioning", last_error: errorOf(identus) })
+      .eq("user_id", userId)
+      .eq("kind", "identus")
+      .eq("app_prefix", data.appPrefix);
+    await supabase
+      .from("fly_deployments")
+      .update({ status: "provisioning", last_error: errorOf(midnight) })
+      .eq("user_id", userId)
+      .eq("kind", "midnight")
+      .eq("app_prefix", data.appPrefix);
+
+    await supabase.from("activity_log").insert({
+      user_id: userId,
+      kind: "stack.repaired",
+      summary: `Repaired stack config for ${data.appPrefix} (process-group DNS + node RPC)`,
+      metadata: { appPrefix: data.appPrefix, identus: errorOf(identus), midnight: errorOf(midnight) } as never,
+    });
+
+    if (identus.status === "rejected" && midnight.status === "rejected") {
+      throw new Error(`${errorOf(identus)} | ${errorOf(midnight)}`);
+    }
+    return {
+      identus: identus.status === "fulfilled" ? { ok: true } : { ok: false, error: errorOf(identus) },
+      midnight: midnight.status === "fulfilled" ? { ok: true } : { ok: false, error: errorOf(midnight) },
+    };
+  });
+
+
 /** Lists the existing IPS stack deployments for the signed-in user (both kinds). */
 export const listStacks = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

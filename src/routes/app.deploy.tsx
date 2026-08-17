@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, CheckCircle2, Cloud, ExternalLink, Loader2, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Cloud, ExternalLink, Loader2, RefreshCw, Rocket, Trash2, Wrench } from "lucide-react";
 import { SectionHeading, Panel } from "@/components/SectionHeading";
 import { StatusDot, TruncatedMono } from "@/components/MonoValue";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
   provisionFullStack,
   checkFullStack,
   destroyFullStack,
+  repairFullStack,
   listStacks,
 } from "@/lib/stack.functions";
 import { StackTimeline } from "@/components/deploy/StackTimeline";
@@ -80,6 +81,7 @@ function DeployConsole() {
   const provision = useServerFn(provisionFullStack);
   const check = useServerFn(checkFullStack);
   const destroy = useServerFn(destroyFullStack);
+  const repair = useServerFn(repairFullStack);
 
   const [prefix, setPrefix] = useState("");
   const [label, setLabel] = useState("");
@@ -128,6 +130,21 @@ function DeployConsole() {
       qc.invalidateQueries({ queryKey: ["stacks"] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Provisioning failed"),
+  });
+
+  const repairMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return repair({ data: { appPrefix: selected.appPrefix, region: selected.region } });
+    },
+    onSuccess: (res) => {
+      const failed = [!res.identus.ok ? "Identus" : null, !res.midnight.ok ? "Midnight" : null].filter(Boolean);
+      if (failed.length) toast.warning(`Repair partially applied — ${failed.join(" and ")} failed.`);
+      else toast.success("Stack config re-applied — machines restarting.");
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Repair failed"),
   });
 
   const destroyMut = useMutation({
@@ -195,6 +212,8 @@ function DeployConsole() {
               onCheck={() => void readiness.refetch()}
               onDestroy={() => destroyMut.mutate()}
               destroyLoading={destroyMut.isPending}
+              onRepair={() => repairMut.mutate()}
+              repairLoading={repairMut.isPending}
             />
           ) : null}
 
@@ -319,6 +338,8 @@ function StackDetail({
   onCheck,
   onDestroy,
   destroyLoading,
+  onRepair,
+  repairLoading,
 }: {
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
@@ -327,6 +348,8 @@ function StackDetail({
   onCheck: () => void;
   onDestroy: () => void;
   destroyLoading: boolean;
+  onRepair: () => void;
+  repairLoading: boolean;
 }) {
   const identus = readiness?.identus;
   const midnight = readiness?.midnight;
@@ -342,10 +365,14 @@ function StackDetail({
         <p className="text-xs text-muted-foreground sm:truncate">
           Region {stack.region} · provisioned {new Date(stack.created_at).toLocaleString()}
         </p>
-        <div className="flex items-center gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">
+        <div className="flex flex-wrap items-center gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">
           <Button variant="outline" size="sm" onClick={onCheck} disabled={checking}>
             {checking ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
             Check
+          </Button>
+          <Button variant="outline" size="sm" onClick={onRepair} disabled={repairLoading}>
+            {repairLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wrench className="mr-1.5 h-3.5 w-3.5" />}
+            Repair config
           </Button>
           <Button variant="ghost" size="sm" onClick={onDestroy} disabled={destroyLoading} className="text-destructive hover:text-destructive">
             {destroyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
@@ -353,6 +380,7 @@ function StackDetail({
           </Button>
         </div>
       </div>
+
 
       <div className="grid gap-4 lg:grid-cols-2">
         <HalfCard

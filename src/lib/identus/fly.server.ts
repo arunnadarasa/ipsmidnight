@@ -202,16 +202,52 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
   };
 }
 
+/**
+ * Fly private DNS keys off the machine's `fly_process_group` metadata, NOT its
+ * name: without this, `identus-postgres.process.<app>.internal` throws
+ * UnknownHostException and the PRISM node / agent die during Flyway migration.
+ */
+function machineBody(spec: { name: string; config: Record<string, unknown> }, region: string) {
+  return JSON.stringify({
+    name: spec.name,
+    region,
+    config: { ...spec.config, metadata: { fly_process_group: spec.name } },
+  });
+}
+
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
   const spec = machineSpec(kind, appName, adminKey);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
-  const body = JSON.stringify({ name: spec.name, region, config: spec.config });
+  const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
   if (existing) {
     await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
     return { ...existing, state: "updating" };
   }
   return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
+}
+
+/**
+ * Re-applies the corrected machine specs (process-group metadata, env, ports) to
+ * an already-provisioned app and restarts each machine. Idempotent; the Postgres
+ * data and DID state are untouched.
+ */
+export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const repaired: string[] = [];
+  for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
+    const spec = machineSpec(kind, appName, adminKey);
+    const existing = machines.find((m) => m.name === spec.name);
+    const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
+    if (existing) {
+      await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
+      await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
+    } else {
+      await fly(`/apps/${appName}/machines`, { method: "POST", body });
+    }
+    repaired.push(spec.name);
+  }
+  return { appName, repaired };
 }
 
 export type IdentusProvisionResult = IdentusStackUrls & {
