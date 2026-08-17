@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Activity, Cloud, FileHeart, IdCard, LayoutDashboard, LogOut, Menu, Moon, ShieldCheck } from "lucide-react";
+import { Activity, Cloud, FileHeart, Github, IdCard, LayoutDashboard, LogOut, Menu, Moon, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { signOut } from "@/hooks/useAuth";
@@ -55,6 +55,15 @@ export function AppShell({ children, email }: { children: ReactNode; email?: str
         </Link>
         <NavLinks />
         <div className="mt-auto space-y-2 pt-6">
+          <a
+            href="https://github.com/arunnadarasa/ipsmidnight"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+          >
+            <Github className="h-4 w-4 shrink-0" />
+            <span className="truncate">View source on GitHub</span>
+          </a>
           <p className="truncate px-3 text-xs text-muted-foreground">{email ?? "Signed in"}</p>
           <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => void signOut()}>
             <LogOut className="mr-2 h-4 w-4" /> Sign out
@@ -76,6 +85,15 @@ export function AppShell({ children, email }: { children: ReactNode; email?: str
               <Button variant="ghost" size="sm" className="mt-6 w-full justify-start" onClick={() => void signOut()}>
                 <LogOut className="mr-2 h-4 w-4" /> Sign out
               </Button>
+              <a
+                href="https://github.com/arunnadarasa/ipsmidnight"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+              >
+                <Github className="h-4 w-4 shrink-0" />
+                <span className="truncate">View source on GitHub</span>
+              </a>
             </SheetContent>
           </Sheet>
           <span className="min-w-0 truncate font-display text-sm font-semibold">IPS Console</span>

@@ -88,7 +88,16 @@ function Landing() {
         </ul>
 
         <p className="mt-14 text-xs text-muted-foreground">
-          Demonstration software. Not a certified medical device or clinical record system.
+          Demonstration software. Not a certified medical device or clinical record system.{" "}
+          <a
+            href="https://github.com/arunnadarasa/ipsmidnight"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            View source on GitHub
+          </a>
+          .
         </p>
       </div>
     </main>
