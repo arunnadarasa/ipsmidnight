@@ -21,12 +21,12 @@
  *                                   --proof   https://<app>.fly.dev:6300
  */
 import { writeFileSync, existsSync } from "node:fs";
-import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import WebSocket from "ws";
 
 globalThis.WebSocket = WebSocket;
 
-const require = createRequire(import.meta.url);
 const args = Object.fromEntries(
   process.argv.slice(2).flatMap((a, i, all) => (a.startsWith("--") ? [[a.slice(2), all[i + 1]]] : [])),
 );
@@ -46,7 +46,12 @@ const PRIVATE_STATE_STORE = "ips-midnight-level-db";
 const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-2026";
 const DEPLOYER_SECRET_HEX = "11".repeat(32);
 
-const CONTRACT_DIR = "contracts/managed/ips-anchor-registry";
+// The Midnight JS SDK is ESM-only and heavy; it is installed in a scratch
+// folder rather than the app's package.json, so the script may be copied next
+// to that node_modules and pointed back at the repo with --project.
+const PROJECT = resolve(args.project ?? process.cwd());
+const CONTRACT_DIR = resolve(PROJECT, "contracts/managed/ips-anchor-registry");
+const OUT_FILE = resolve(PROJECT, "src/data/midnight-contract.undeployed.json");
 if (!existsSync(`${CONTRACT_DIR}/contract/index.js`) && !existsSync(`${CONTRACT_DIR}/contract/index.cjs`)) {
   console.error(`Compile first: compact compile contracts/IpsAnchorRegistry.compact ${CONTRACT_DIR}`);
   process.exit(1);
