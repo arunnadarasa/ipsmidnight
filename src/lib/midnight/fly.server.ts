@@ -262,10 +262,39 @@ export async function provisionStack(input: {
   return { ...stackUrls(appName), created, machines };
 }
 
+/**
+ * A crash-looping machine reports `started` between reboots, so the raw state
+ * hides the failure. Fly's event list carries the last exit, which is the only
+ * reliable signal that a container is rebooting instead of running.
+ */
+export function exitSummary(m: FlyMachine): { exitCode: number | null; oomKilled: boolean; restarts: number; detail: string | null } {
+  const events = m.events ?? [];
+  const exits = events.filter((e) => e.request?.exit_event);
+  const last = exits[0]?.request?.exit_event ?? null;
+  const exitCode = typeof last?.exit_code === "number" ? last.exit_code : null;
+  const oomKilled = Boolean(last?.oom_killed);
+  const restarts = exits.length;
+  const detail =
+    oomKilled
+      ? `${m.name} was killed for running out of memory (restarted ${restarts}×).`
+      : exitCode !== null && exitCode !== 0
+        ? `${m.name} exited with code ${exitCode} and is restarting (${restarts} exits recorded).`
+        : null;
+  return { exitCode, oomKilled, restarts, detail };
+}
+
 export async function machineStates(appName: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
-  return machines.map((m) => ({ name: m.name, id: m.id, state: m.state, region: m.region ?? null }));
+  return machines.map((m) => ({
+    name: m.name,
+    id: m.id,
+    state: m.state,
+    region: m.region ?? null,
+    image: m.config?.image ?? null,
+    ...exitSummary(m),
+  }));
 }
+
 
 export async function destroyStack(appName: string) {
   await flyOptional(`/apps/${appName}?force=true`, { method: "DELETE" });
