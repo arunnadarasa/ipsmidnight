@@ -28,9 +28,13 @@ function token() {
   return t;
 }
 
-async function fly<T>(path: string, init?: RequestInit & { raw?: boolean }): Promise<T> {
+async function fly<T>(path: string, init?: RequestInit & { raw?: boolean; timeoutMs?: number }): Promise<T> {
+  // Deadline on every Machines call — a hanging request would otherwise freeze
+  // the readiness check and leave the deploy timeline spinning forever.
+  const { timeoutMs, raw: _raw, ...rest } = init ?? {};
   const res = await fetch(`${MACHINES_API}${path}`, {
-    ...init,
+    ...rest,
+    signal: AbortSignal.timeout(timeoutMs ?? 20_000),
     headers: {
       Authorization: `Bearer ${token()}`,
       "Content-Type": "application/json",
@@ -43,6 +47,7 @@ async function fly<T>(path: string, init?: RequestInit & { raw?: boolean }): Pro
   }
   return (text ? JSON.parse(text) : {}) as T;
 }
+
 
 async function flyOptional<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
