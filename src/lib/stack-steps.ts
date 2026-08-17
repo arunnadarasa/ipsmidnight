@@ -198,8 +198,12 @@ export function midnightSteps(input: {
       state: probes?.indexer.ok ? "done" : indexerUp || nodeUp ? "active" : "pending",
       ...(probes?.blockHeight != null ? { value: `block ${probes.blockHeight}` } : {}),
       ...(probes && !probes.indexer.ok && probes.indexer.detail ? { detail: probes.indexer.detail } : {}),
-      hint: "GraphQL endpoint answers once the node produces blocks",
+      hint:
+        probes && !probes.indexer.ok && probes.blockHeight === null && indexerUp && nodeUp
+          ? "the indexer answers but has no blocks — run Repair to reconnect it to the node RPC"
+          : "ingests blocks from the node over the private network",
     },
+
     {
       key: "proof-ready",
       label: "Proof server ready",

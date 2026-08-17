@@ -190,12 +190,36 @@ function MidnightConsole() {
                 </Badge>
               </div>
 
+              {health.data ? (
+                <p className="text-xs text-muted-foreground">
+                  Chain height:{" "}
+                  <span className="font-mono">
+                    {health.data.probes.blockHeight != null
+                      ? `#${health.data.probes.blockHeight}`
+                      : "no blocks ingested"}
+                  </span>
+                </p>
+              ) : null}
+
               <ul className="space-y-2 text-sm">
                 {[
                   { label: "Indexer GraphQL", value: deployment.indexer_url, probe: health.data?.probes.indexer },
                   { label: "Proof server", value: deployment.proof_url, probe: health.data?.probes.proof },
-                  { label: "Node RPC", value: deployment.node_url, probe: undefined },
+                  {
+                    label: "Node RPC (via indexer sync)",
+                    value: deployment.node_url,
+                    probe: health.data
+                      ? {
+                          ok: health.data.probes.blockHeight != null,
+                          detail:
+                            health.data.probes.blockHeight != null
+                              ? `indexer following the chain at #${health.data.probes.blockHeight}`
+                              : "indexer is not receiving blocks from this RPC",
+                        }
+                      : undefined,
+                  },
                 ].map((row) => (
+
                   <li key={row.label} className="rounded-md border border-border bg-card/40 px-3 py-2">
                     <div className="flex items-center gap-2">
                       <StatusDot
