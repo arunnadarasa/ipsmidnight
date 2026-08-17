@@ -375,8 +375,6 @@ export const repairMidnightOnly = createServerFn({ method: "POST" })
   });
 
 
-    return { ok: true };
-  });
 
 /**
 
