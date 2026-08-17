@@ -24,6 +24,8 @@ import {
   destroyFullStack,
   repairFullStack,
   repairIdentusOnly,
+  repairMidnightOnly,
+
   reconnectStack,
   listStacks,
 } from "@/lib/stack.functions";
@@ -168,6 +170,20 @@ function DeployConsole() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Identus repair failed"),
   });
 
+  const repairMidnightMut = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("No stack selected");
+      return repairMidnight({ data: { appPrefix: selected.appPrefix, region: selected.region } });
+    },
+    onSuccess: () => {
+      toast.success("Midnight machines re-applied — the indexer is reconnecting to the node RPC.");
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Midnight repair failed"),
+  });
+
+
   const reconnectMut = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("No stack selected");
@@ -252,6 +268,9 @@ function DeployConsole() {
               repairLoading={repairMut.isPending}
               onRepairIdentus={() => repairIdentusMut.mutate()}
               repairIdentusLoading={repairIdentusMut.isPending}
+              onRepairMidnight={() => repairMidnightMut.mutate()}
+              repairMidnightLoading={repairMidnightMut.isPending}
+
               onReconnect={() => reconnectMut.mutate()}
               reconnectLoading={reconnectMut.isPending}
 
