@@ -24,6 +24,8 @@ import {
   destroyFullStack,
   listStacks,
 } from "@/lib/stack.functions";
+import { StackTimeline } from "@/components/deploy/StackTimeline";
+import { identusSteps, midnightSteps, type StackStep } from "@/lib/stack-steps";
 
 type MachineLike = { name: string; id: string; state: string; region?: string | null };
 
