@@ -329,6 +329,35 @@ export async function identusMachineStates(appName: string) {
   }));
 }
 
+/**
+ * Last error-ish line from the cloud-agent's log stream. The Machines API has no
+ * log endpoint, so this uses the app log API; every failure degrades to null
+ * because a missing log must never fail a readiness check.
+ */
+export async function agentLogTail(appName: string): Promise<string | null> {
+  try {
+    const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+    const agent = machines.find((m) => m.name === "identus-cloud-agent");
+    if (!agent) return null;
+    const res = await fetch(
+      `https://api.fly.io/api/v1/apps/${appName}/logs?instance=${agent.id}`,
+      { headers: { Authorization: `Bearer ${token()}` }, signal: AbortSignal.timeout(15_000) },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
+    const lines = (json.data ?? [])
+      .map((d) => (d.attributes?.message ?? "").trim())
+      .filter(Boolean);
+    const interesting = lines.filter((l) =>
+      /error|exception|caused by|fatal|failed|refused|unknownhost/i.test(l),
+    );
+    const pick = interesting.at(-1) ?? lines.at(-1) ?? null;
+    return pick ? pick.slice(0, 400) : null;
+  } catch {
+    return null;
+  }
+}
+
 
 export async function identusDiagnostics(appName: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
