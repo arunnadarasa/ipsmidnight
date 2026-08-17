@@ -383,6 +383,9 @@ function StackDetail({
   repairLoading,
   onRepairIdentus,
   repairIdentusLoading,
+  onRepairMidnight,
+  repairMidnightLoading,
+
   onReconnect,
   reconnectLoading,
 }: {
@@ -432,6 +435,15 @@ function StackDetail({
             )}
             Fix agent DB
           </Button>
+          <Button variant="outline" size="sm" onClick={onRepairMidnight} disabled={repairMidnightLoading}>
+            {repairMidnightLoading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wrench className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Fix indexer
+          </Button>
+
           <Button variant="outline" size="sm" onClick={onReconnect} disabled={reconnectLoading}>
             {reconnectLoading ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
