@@ -485,15 +485,26 @@ function HalfCard({
           </p>
         ) : null}
 
+        <StackTimeline
+          steps={steps}
+          startedAt={startedAt}
+          {...(regionLabel ? { regionLabel } : {})}
+          {...(onRetry ? { onRetry } : {})}
+          {...(retrying !== undefined ? { retrying } : {})}
+        />
+
         {machines?.length ? (
-          <ul className="space-y-1">
-            {machines.map((m) => (
-              <li key={m.id ?? m.name} className="flex items-center justify-between rounded-md border border-border bg-card/40 px-2.5 py-1.5 text-xs">
-                <span className="truncate font-mono">{m.name}</span>
-                <span className="shrink-0 text-muted-foreground">{m.state}</span>
-              </li>
-            ))}
-          </ul>
+          <details className="rounded-md border border-border bg-card/40 px-2.5 py-1.5">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Fly machines ({machines.length})</summary>
+            <ul className="mt-1.5 space-y-1">
+              {machines.map((m) => (
+                <li key={m.id ?? m.name} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate font-mono">{m.name}</span>
+                  <span className="shrink-0 text-muted-foreground">{m.state}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
         ) : null}
 
         {ready && readyTo ? (
