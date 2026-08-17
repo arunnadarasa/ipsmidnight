@@ -499,27 +499,65 @@ export async function midnightDiagnostics(appName: string) {
     }
   }
 
+  /**
+   * The app log API only answers for org-scoped tokens; with the app-scoped
+   * token this project uses it returns 401. Say that plainly instead of
+   * printing `log api 401` as if it described the indexer.
+   */
   async function appLog(machineId: string) {
     try {
       const res = await fetch(`https://api.fly.io/api/v1/apps/${appName}/logs?instance=${machineId}`, {
         headers: { Authorization: `Bearer ${token()}` },
         signal: AbortSignal.timeout(20_000),
       });
-      if (!res.ok) return `log api ${res.status}`;
+      if (res.status === 401 || res.status === 403) return null;
+      if (!res.ok) return null;
       const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
       const lines = (json.data ?? []).map((d) => d.attributes?.message ?? "").filter(Boolean);
-      return lines.slice(-40).join("\n").slice(-2000);
-    } catch (err) {
-      return err instanceof Error ? err.message.slice(0, 200) : "log unavailable";
+      return lines.slice(-40).join("\n").slice(-2000) || null;
+    } catch {
+      return null;
     }
   }
 
+  /**
+   * Container log via exec, for images whose stdout we cannot fetch. Tries the
+   * usual log locations and reports "no log file in this image" rather than an
+   * empty string, so the timeline never implies an empty log means "healthy".
+   */
+  async function execLog(machineId: string) {
+    const out = await exec(
+      machineId,
+      `for f in /var/log/*.log /tmp/*.log; do [ -f "$f" ] && tail -c 1500 "$f"; done 2>/dev/null || true`,
+    );
+    return out || null;
+  }
+
+  /** Works on toolless images: curl → wget → nc, else say the probe cannot run. */
+  function reach(label: string, url: string, hostPort: string) {
+    return `if command -v curl >/dev/null 2>&1; then echo "${label}=$(curl -sk -m 8 -o /dev/null -w '%{http_code}' ${url})"; \
+elif command -v wget >/dev/null 2>&1; then wget -q -T 8 -O /dev/null ${url} && echo "${label}=reachable" || echo "${label}=unreachable"; \
+elif command -v nc >/dev/null 2>&1; then nc -z -w 8 ${hostPort} && echo "${label}=tcp-open" || echo "${label}=tcp-closed"; \
+else echo "${label}=probe-unavailable-in-this-image"; fi`;
+  }
+
+  const edgeHost = `${appName}.fly.dev`;
+
   return {
-    indexerLog: indexer ? await appLog(indexer.id) : null,
-    nodeLog: node ? await appLog(node.id) : null,
-    // Does the node's RPC answer over the flycast path the indexer uses?
-    nodeRpcFromNode: node ? await exec(node.id, `curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:9944/health; echo " local"; curl -s -m 8 -o /dev/null -w '%{http_code}' http://${appName}.flycast:9944/health; echo " flycast"`) : null,
-    nodeRpcFromIndexer: indexer ? await exec(indexer.id, `(command -v curl >/dev/null && curl -s -m 8 -o /dev/null -w 'flycast=%{http_code}' http://${appName}.flycast:9944/health) || echo no-curl; echo; (command -v getent >/dev/null && getent hosts ${appName}.flycast) || echo no-getent`) : null,
+    indexerLog: indexer ? ((await appLog(indexer.id)) ?? (await execLog(indexer.id))) : null,
+    nodeLog: node ? ((await appLog(node.id)) ?? (await execLog(node.id))) : null,
+    // Public IPs / flycast, read back from Fly rather than assumed.
+    ips: await appIpSummary(appName),
+    // Does the node's RPC answer locally, and through the edge the indexer dials?
+    nodeRpcFromNode: node
+      ? await exec(
+          node.id,
+          `${reach("local", "http://127.0.0.1:9944/health", "127.0.0.1 9944")}; ${reach("edge", `https://${edgeHost}:9944/health`, `${edgeHost} 9944`)}`,
+        )
+      : null,
+    nodeRpcFromIndexer: indexer
+      ? await exec(indexer.id, reach("edge", `https://${edgeHost}:9944/health`, `${edgeHost} 9944`))
+      : null,
     machines: machines.map((m) => ({ name: m.name, state: m.state, ...exitSummary(m) })),
   };
 }
