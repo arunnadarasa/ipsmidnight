@@ -18,8 +18,27 @@ export type StackStep = {
   detail?: string;
 };
 
-type MachineLike = { name: string; id: string; state: string; region?: string | null };
+type MachineLike = {
+  name: string;
+  id: string;
+  state: string;
+  region?: string | null;
+  /** Populated by the Fly readers: last non-zero exit / OOM detail. */
+  exitCode?: number | null;
+  oomKilled?: boolean | null;
+  restarts?: number | null;
+  detail?: string | null;
+};
 type Probe = { name: string; ok: boolean; status: number | null; detail: string };
+
+/** A machine that keeps exiting non-zero is failing even while state is "started". */
+function crashDetail(m: MachineLike): string | null {
+  if (m.oomKilled) return m.detail ?? `${m.name} ran out of memory.`;
+  if (typeof m.exitCode === "number" && m.exitCode !== 0 && (m.restarts ?? 0) > 1) {
+    return m.detail ?? `${m.name} exited with code ${m.exitCode} and is restarting.`;
+  }
+  return null;
+}
 
 function machineStep(
   key: string,
@@ -32,9 +51,11 @@ function machineStep(
   if (!m) {
     return { key, label, state: machines?.length ? "active" : "pending", ...(hint ? { hint } : {}) };
   }
+  const crash = crashDetail(m);
   const s = (m.state ?? "").toLowerCase();
-  const state: StepState =
-    s === "started"
+  const state: StepState = crash
+    ? "failed"
+    : s === "started"
       ? "done"
       : s === "stopped" || s === "failed" || s === "destroyed"
         ? "failed"
@@ -43,11 +64,12 @@ function machineStep(
     key,
     label,
     state,
-    value: m.state,
+    value: crash ? "restarting" : m.state,
     ...(hint ? { hint } : {}),
-    ...(state === "failed" ? { detail: `Machine ${m.name} is ${m.state}.` } : {}),
+    ...(state === "failed" ? { detail: crash ?? `Machine ${m.name} is ${m.state}.` } : {}),
   };
 }
+
 
 function probeStep(
   key: string,

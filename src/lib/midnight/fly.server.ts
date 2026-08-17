@@ -1,8 +1,26 @@
-import { IMAGES, INDEXER_ENV, stackUrls, type StackUrls } from "./shared";
+import { IMAGES, INDEXER_ENV, nodeRpcWsUrl, stackUrls, type StackUrls } from "./shared";
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
-type FlyMachine = { id: string; name: string; state: string; region?: string };
+const NODE_VOLUME = "midnight_chain";
+const NODE_DATA_PATH = "/node/chain";
+
+type FlyExitEvent = { exit_code?: number | null; oom_killed?: boolean | null };
+type FlyMachineEvent = {
+  type?: string;
+  status?: string;
+  timestamp?: number;
+  request?: { exit_event?: FlyExitEvent | null } | null;
+};
+type FlyMachine = {
+  id: string;
+  name: string;
+  state: string;
+  region?: string;
+  events?: FlyMachineEvent[];
+  config?: { image?: string } | null;
+};
+
 
 function token() {
   const t = process.env["FLY_API_TOKEN"];
@@ -59,33 +77,31 @@ async function allocateIps(appName: string) {
   }
 }
 
-function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
+function machineConfig(
+  kind: "node" | "indexer" | "proof",
+  appName: string,
+  volumeId?: string | null,
+) {
   if (kind === "node") {
     return {
       name: "midnight-node",
       region: undefined,
       config: {
         image: IMAGES.node,
+        // Exactly the upstream standalone stack: the `dev` preset already
+        // authors blocks. Extra CLI arguments (--alice, --force-authoring,
+        // --experimental-rpc-endpoint) made the node dump its whole config and
+        // exit 1 in a reboot loop, so the machine runs with no init.cmd at all.
         env: {
           CFG_PRESET: "dev",
           RUST_LOG: "info",
-          SHOW_CONFIG: "false",
           SIDECHAIN_BLOCK_BENEFICIARY:
             "04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e",
         },
-        // --alice --force-authoring: seal blocks alone (otherwise the node boots as
-        // a plain full node and stays at #0). The IPv6 listen-addr is mandatory —
-        // Fly's 6PN network is IPv6-only and the default RPC socket is IPv4-only,
-        // so the indexer could never reach ws://…internal:9944.
-        init: {
-          cmd: [
-            "--alice",
-            "--force-authoring",
-            "--experimental-rpc-endpoint",
-            "listen-addr=[::]:9944,methods=unsafe",
-          ],
-        },
         guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // Chain data survives restarts and repairs, so a deployed contract
+        // address stays valid.
+        ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
         // 9944 stays private to the 6PN network; the indexer is the public surface.
         services: [
           {
@@ -99,6 +115,7 @@ function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
       },
     };
   }
+
   if (kind === "indexer") {
     return {
       name: "midnight-indexer",
@@ -107,8 +124,12 @@ function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
         image: IMAGES.indexer,
         env: {
           ...INDEXER_ENV,
-          APP__INFRA__NODE__URL: `ws://midnight-node.process.${appName}.internal:9944`,
+          APP__INFRA__NODE__URL: nodeRpcWsUrl(appName),
+          // Indexer 4.3.x reads the SPO node separately; upstream points both
+          // at the same node and omitting it stops the chain indexer booting.
+          APP__INFRA__SPO_NODE__URL: nodeRpcWsUrl(appName),
         },
+
         guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
         services: [
           {
@@ -159,13 +180,35 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
   });
 }
 
+/**
+ * Reuses an existing chain volume in the region or creates one. Returns null on
+ * failure so a missing volume degrades to ephemeral chain data rather than
+ * blocking the whole provision.
+ */
+async function ensureNodeVolume(appName: string, region: string): Promise<string | null> {
+  try {
+    const volumes =
+      (await flyOptional<{ id: string; name: string; region: string }[]>(`/apps/${appName}/volumes`)) ?? [];
+    const existing = volumes.find((v) => v.name === NODE_VOLUME && v.region === region);
+    if (existing) return existing.id;
+    const created = await fly<{ id: string }>(`/apps/${appName}/volumes`, {
+      method: "POST",
+      body: JSON.stringify({ name: NODE_VOLUME, region, size_gb: 10 }),
+    });
+    return created.id;
+  } catch {
+    return null;
+  }
+}
+
 async function ensureMachine(
   appName: string,
   kind: "node" | "indexer" | "proof",
   region: string,
 ): Promise<FlyMachine> {
-  const spec = machineConfig(kind, appName);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
+  const spec = machineConfig(kind, appName, volumeId);
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
   if (existing) {
@@ -180,7 +223,8 @@ export async function repairMidnightStack(appName: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
   for (const kind of ["node", "indexer", "proof"] as const) {
-    const spec = machineConfig(kind, appName);
+    const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
+    const spec = machineConfig(kind, appName, volumeId);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     const existing = machines.find((m) => m.name === spec.name);
     if (existing) {
@@ -193,6 +237,7 @@ export async function repairMidnightStack(appName: string, region: string) {
   }
   return { appName, repaired };
 }
+
 
 export type ProvisionResult = StackUrls & {
   created: boolean;
@@ -217,10 +262,39 @@ export async function provisionStack(input: {
   return { ...stackUrls(appName), created, machines };
 }
 
+/**
+ * A crash-looping machine reports `started` between reboots, so the raw state
+ * hides the failure. Fly's event list carries the last exit, which is the only
+ * reliable signal that a container is rebooting instead of running.
+ */
+export function exitSummary(m: FlyMachine): { exitCode: number | null; oomKilled: boolean; restarts: number; detail: string | null } {
+  const events = m.events ?? [];
+  const exits = events.filter((e) => e.request?.exit_event);
+  const last = exits[0]?.request?.exit_event ?? null;
+  const exitCode = typeof last?.exit_code === "number" ? last.exit_code : null;
+  const oomKilled = Boolean(last?.oom_killed);
+  const restarts = exits.length;
+  const detail =
+    oomKilled
+      ? `${m.name} was killed for running out of memory (restarted ${restarts}×).`
+      : exitCode !== null && exitCode !== 0
+        ? `${m.name} exited with code ${exitCode} and is restarting (${restarts} exits recorded).`
+        : null;
+  return { exitCode, oomKilled, restarts, detail };
+}
+
 export async function machineStates(appName: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
-  return machines.map((m) => ({ name: m.name, id: m.id, state: m.state, region: m.region ?? null }));
+  return machines.map((m) => ({
+    name: m.name,
+    id: m.id,
+    state: m.state,
+    region: m.region ?? null,
+    image: m.config?.image ?? null,
+    ...exitSummary(m),
+  }));
 }
+
 
 export async function destroyStack(appName: string) {
   await flyOptional(`/apps/${appName}?force=true`, { method: "DELETE" });
