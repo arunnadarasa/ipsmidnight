@@ -183,18 +183,11 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
         AGENT_DB_NAME: "agent",
         AGENT_DB_USER: IDENTUS_DB.user,
         AGENT_DB_PASSWORD: IDENTUS_DB.password,
-        // The agent's own Flyway/secret-storage layer reads the plain POSTGRES_*
-        // group; without it, secret storage initialisation fails on boot.
-        POSTGRES_HOST: pgHost,
-        POSTGRES_PORT: "5432",
-        POSTGRES_DB: "agent",
-        POSTGRES_USER: IDENTUS_DB.user,
-        POSTGRES_PASSWORD: IDENTUS_DB.password,
         PRISM_NODE_HOST: `identus-prism-node.process.${appName}.internal`,
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
         DEFAULT_WALLET_ENABLED: "true",
-        DEFAULT_WALLET_SEED: walletSeed,
+
         DEFAULT_WALLET_AUTH_API_KEY: adminKey,
         ADMIN_TOKEN: adminKey,
         API_KEY_ENABLED: "true",
