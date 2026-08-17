@@ -110,6 +110,44 @@ function withLog(step: StackStep, logTail?: string | null): StackStep {
 }
 
 
+const IDENTUS_STEP_LABELS: [string, string][] = [
+  ["app", "Fly app created"],
+  ["pg", "Postgres started"],
+  ["prism", "PRISM node booting"],
+  ["agent", "Cloud agent booting"],
+  ["system", "Agent health: system"],
+  ["did-registrar", "Agent health: DID registrar"],
+  ["issuance", "Agent health: issuance"],
+  ["connections", "Agent health: connections"],
+];
+
+const MIDNIGHT_STEP_LABELS: [string, string][] = [
+  ["app", "Fly app created"],
+  ["node", "Node started"],
+  ["indexer", "Indexer started"],
+  ["proof", "Proof server started"],
+  ["indexer-sync", "Indexer syncing"],
+  ["proof-ready", "Proof server ready"],
+];
+
+/**
+ * The Fly app does not exist (never provisioned, or destroyed). Every step is
+ * pending — no spinner, no false "app created" tick.
+ */
+function notProvisionedSteps(labels: [string, string][]): StackStep[] {
+  return labels.map(([key, label], i) => ({
+    key,
+    label,
+    state: "pending" as StepState,
+    ...(i === 0 ? { hint: "not provisioned — no Fly app exists for this half" } : {}),
+  }));
+}
+
+/** True when the derived step list is the "nothing provisioned" placeholder. */
+export function isNotProvisioned(steps: StackStep[]) {
+  return steps.length > 0 && steps.every((s) => s.state === "pending");
+}
+
 export function identusSteps(input: {
   appName?: string | null;
   machines?: MachineLike[] | undefined;
@@ -119,9 +157,14 @@ export function identusSteps(input: {
   logTail?: string | null;
   /** False when no admin key is stored for this stack, so probes cannot run. */
   hasKey?: boolean;
+  /** Whether the Fly app itself exists; false = never provisioned / destroyed. */
+  exists?: boolean | null;
 }): StackStep[] {
-  const { appName, machines, probes, logTail, hasKey = true } = input;
-  const created = Boolean(appName);
+  const { appName, machines, probes, logTail, hasKey = true, exists } = input;
+  if (exists === false) return notProvisionedSteps(IDENTUS_STEP_LABELS);
+  // The app *name* is derived from the prefix, so it can never prove existence —
+  // only a confirmed Fly app (or a running machine) counts as created.
+  const created = exists === true || Boolean(machines?.length);
   const agentStep = machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start");
   // While the agent is crash-looping, the health probes can only ever spin — keep
   // them pending so the failed boot step is the one thing the user reads.
@@ -185,9 +228,12 @@ export function midnightSteps(input: {
       }
     | null
     | undefined;
+  /** Whether the Fly app itself exists; false = never provisioned / destroyed. */
+  exists?: boolean | null;
 }): StackStep[] {
-  const { appName, machines, probes, diagnostics } = input;
-  const created = Boolean(appName);
+  const { appName, machines, probes, diagnostics, exists } = input;
+  if (exists === false) return notProvisionedSteps(MIDNIGHT_STEP_LABELS);
+  const created = exists === true || Boolean(machines?.length);
   const nodeUp = machines?.find((m) => m.name === "midnight-node")?.state === "started";
   const indexerUp = machines?.find((m) => m.name === "midnight-indexer")?.state === "started";
 
