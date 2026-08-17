@@ -168,11 +168,15 @@ export const checkFullStack = createServerFn({ method: "POST" })
         status: identusStatus,
         ready: identusHealth.ready,
         logTail: identusLog,
+        // Without a stored admin key the probes cannot run at all — the UI needs
+        // to say "reconnect" rather than show a spinner that never resolves.
+        hasKey: Boolean(conn?.api_key),
       },
       midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady },
       allReady: identusHealth.ready && midnightReady,
       appPrefix: data.appPrefix,
     };
+
   });
 
 /** Tears down both halves of an IPS stack. 404s on Fly are treated as already-gone. */
