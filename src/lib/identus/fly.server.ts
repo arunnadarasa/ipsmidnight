@@ -350,9 +350,16 @@ function pickErrorText(raw: string): string | null {
     .map((l) => l.trim())
     .filter(Boolean);
   if (!lines.length) return null;
-  const idx = lines.findLastIndex((l) =>
-    /error|exception|caused by|fatal|failed|refused|unknownhost|denied|timeout|no such/i.test(l),
-  );
+  const re = /error|exception|caused by|fatal|failed|refused|unknownhost|denied|timeout|no such/i;
+  let idx = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line && re.test(line)) {
+      idx = i;
+      break;
+    }
+  }
+
   const slice = idx >= 0 ? lines.slice(idx, idx + 4) : lines.slice(-4);
   return slice.join(" | ").slice(0, 700);
 }
