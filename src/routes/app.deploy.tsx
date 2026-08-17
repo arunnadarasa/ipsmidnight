@@ -400,6 +400,9 @@ function StackDetail({
   repairLoading: boolean;
   onRepairIdentus: () => void;
   repairIdentusLoading: boolean;
+  onRepairMidnight: () => void;
+  repairMidnightLoading: boolean;
+
   onReconnect: () => void;
   reconnectLoading: boolean;
 
