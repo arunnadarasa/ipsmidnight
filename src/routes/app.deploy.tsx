@@ -195,6 +195,8 @@ function DeployConsole() {
               onCheck={() => void readiness.refetch()}
               onDestroy={() => destroyMut.mutate()}
               destroyLoading={destroyMut.isPending}
+              onRepair={() => repairMut.mutate()}
+              repairLoading={repairMut.isPending}
             />
           ) : null}
 
