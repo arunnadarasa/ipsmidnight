@@ -266,10 +266,12 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
  * an already-provisioned app and restarts each machine.
  *
  * The Postgres machine is *destroyed and recreated* rather than restarted: its
- * init script only runs against an empty data directory, so an existing machine
- * would keep missing the `<db>-application-user` roles the agent's migrations
- * grant to. Only agent-internal state lives there (no patient summaries or
- * issued credentials), and the Midnight app is never touched by this call.
+ * init script only runs against an empty data directory, and a pinned major
+ * version change (PG 16 → 13, because the agent's migrations use `format` as a
+ * column name) needs a fresh data directory anyway. Only agent-internal state
+ * lives there (no patient summaries or issued credentials), and the Midnight app
+ * is never touched by this call.
+
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
