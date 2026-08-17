@@ -267,6 +267,9 @@ Scripts: `npm run dev`, `npm run build`, `npm run lint`, `npm run format`.
 - https://build.fhir.org/ig/HL7/CDA-IPS/fp-db11d3be-6643-471a-91d3-be6643e71a7a.html
 - https://github.com/NHSDigital/NHSEngland-FHIR-SCR-IPS
 
+### This project
+- https://github.com/arunnadarasa/ipsmidnight (this repository)
+
 ### Midnight
 - https://docs.midnight.network/llms-full.txt
 - https://docs.midnight.network/relnotes/network (network endpoints)
