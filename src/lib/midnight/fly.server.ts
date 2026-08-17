@@ -63,10 +63,14 @@ async function ensureApp(appName: string, orgSlug: string) {
   return true;
 }
 
-/** Public IPs are allocated through the GraphQL API, not the Machines API. */
+/**
+ * Public IPs are allocated through the GraphQL API, not the Machines API.
+ * The `private` allocation is what makes `<app>.flycast` resolve — without it
+ * the indexer cannot reach the node's RPC through the Fly proxy.
+ */
 async function allocateIps(appName: string) {
   const mutation = `mutation($input: AllocateIPAddressInput!) { allocateIpAddress(input: $input) { ipAddress { address type } } }`;
-  for (const type of ["shared_v4", "v6"] as const) {
+  for (const type of ["shared_v4", "v6", "private"] as const) {
     const res = await fetch("https://api.fly.io/graphql", {
       method: "POST",
       headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
@@ -76,6 +80,7 @@ async function allocateIps(appName: string) {
     await res.text();
   }
 }
+
 
 function machineConfig(
   kind: "node" | "indexer" | "proof",
