@@ -329,7 +329,46 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
       kind: "stack.repaired",
       summary: `Repaired Identus agent for ${data.appPrefix} (database app roles recreated)`,
       metadata: { appPrefix: data.appPrefix, scope: "identus" } as never,
+
+/**
+ * Repairs only the Midnight half: allocates the private (flycast) IP, re-applies
+ * the node/indexer/proof specs and restarts those machines. The Identus machines
+ * are never touched, so a healthy agent and its database stay up.
+ */
+export const repairMidnightOnly = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; region?: string }) => input)
+  .handler(async ({ data, context }) => {
+    const { repairMidnightStack } = await import("@/lib/midnight/fly.server");
+    const { supabase, userId } = context;
+
+    const { data: rows } = await supabase
+      .from("fly_deployments")
+      .select("region")
+      .eq("user_id", userId)
+      .eq("kind", "midnight")
+      .eq("app_prefix", data.appPrefix);
+    const region = data.region ?? rows?.[0]?.region ?? "lhr";
+
+    await repairMidnightStack(`${data.appPrefix}-midnight`, region);
+
+    await supabase
+      .from("fly_deployments")
+      .update({ status: "provisioning", last_error: null })
+      .eq("user_id", userId)
+      .eq("kind", "midnight")
+      .eq("app_prefix", data.appPrefix);
+
+    await supabase.from("activity_log").insert({
+      user_id: userId,
+      kind: "stack.repaired",
+      summary: `Repaired Midnight stack for ${data.appPrefix} (indexer → node RPC over flycast)`,
+      metadata: { appPrefix: data.appPrefix, scope: "midnight" } as never,
     });
+
+    return { ok: true };
+  });
+
 
     return { ok: true };
   });
