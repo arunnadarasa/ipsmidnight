@@ -129,7 +129,7 @@ async function main() {
       privateStoragePasswordProvider: () => PRIVATE_STORAGE_PASSWORD,
     }),
     zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
-    proofProvider: httpClientProofProvider(PROOF),
+    proofProvider: httpClientProofProvider(PROOF, zkConfigProvider),
     publicDataProvider: indexerPublicDataProvider(INDEXER, INDEXER_WS),
     walletProvider: wallet,
     midnightProvider: wallet,

@@ -105,7 +105,7 @@ async function main() {
   const providers = {
     privateStateProvider,
     zkConfigProvider: new NodeZkConfigProvider(CONTRACT_DIR),
-    proofProvider: httpClientProofProvider(PROOF),
+    proofProvider: httpClientProofProvider(PROOF, zkConfigProvider),
     publicDataProvider: indexerPublicDataProvider(INDEXER, INDEXER_WS),
     walletProvider: wallet,
     midnightProvider: wallet,
