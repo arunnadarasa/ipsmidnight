@@ -91,11 +91,24 @@ function probeStep(
   };
 }
 
+/** Recognises a failure that only a fresh agent database can clear. */
+function isDbMigrationFailure(logTail?: string | null) {
+  return Boolean(logTail && /psqlexception|migrating schema|flyway|syntax error|does not exist/i.test(logTail));
+}
+
 /** Surfaces the agent's own log line on the health step so a boot crash is readable. */
 function withLog(step: StackStep, logTail?: string | null): StackStep {
   if (step.state === "done" || !logTail) return step;
-  return { ...step, detail: step.detail ? `${step.detail} — agent log: ${logTail}` : `agent log: ${logTail}` };
+  const hint = isDbMigrationFailure(logTail)
+    ? "agent database migration failed — run Fix agent DB to rebuild it"
+    : step.hint;
+  return {
+    ...step,
+    ...(hint ? { hint } : {}),
+    detail: step.detail ? `${step.detail} — agent log: ${logTail}` : `agent log: ${logTail}`,
+  };
 }
+
 
 export function identusSteps(input: {
   appName?: string | null;

@@ -266,10 +266,12 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
  * an already-provisioned app and restarts each machine.
  *
  * The Postgres machine is *destroyed and recreated* rather than restarted: its
- * init script only runs against an empty data directory, so an existing machine
- * would keep missing the `<db>-application-user` roles the agent's migrations
- * grant to. Only agent-internal state lives there (no patient summaries or
- * issued credentials), and the Midnight app is never touched by this call.
+ * init script only runs against an empty data directory, and a pinned major
+ * version change (PG 16 → 13, because the agent's migrations use `format` as a
+ * column name) needs a fresh data directory anyway. Only agent-internal state
+ * lives there (no patient summaries or issued credentials), and the Midnight app
+ * is never touched by this call.
+
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
@@ -282,13 +284,17 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
     if (existing && recreate) {
       // 404 means it is already gone — either way we continue to the create below.
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
-      await fly(`/apps/${appName}/machines`, { method: "POST", body });
+      const fresh = await fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
+      // Let Postgres finish initdb before the agent is restarted against it,
+      // otherwise the agent burns its first boot on "connection refused".
+      await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
     } else if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
     } else {
       await fly(`/apps/${appName}/machines`, { method: "POST", body });
     }
+
     repaired.push(spec.name);
   }
   return { appName, repaired };
@@ -369,8 +375,23 @@ function pickErrorText(raw: string): string | null {
   })();
 
   const slice = idx >= 0 ? lines.slice(idx, idx + 4) : lines.slice(-4);
-  return slice.join(" | ").slice(0, 700);
+
+  // A Postgres syntax/permission error only tells you *what* broke, not which
+  // Flyway migration ran it — carry the last "Migrating schema … to version …"
+  // line above it so the timeline names the failing migration file.
+  const migrating = /migrating schema|flyway.*version/i;
+  let prefix: string | null = null;
+  for (let i = Math.min(idx, lines.length - 1); i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line && migrating.test(line)) {
+      prefix = line;
+      break;
+    }
+  }
+  const parts = prefix ? [prefix, ...slice] : slice;
+  return parts.join(" | ").slice(0, 700);
 }
+
 
 
 /**
