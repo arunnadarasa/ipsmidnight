@@ -117,14 +117,28 @@ export function identusSteps(input: {
   status?: string;
   /** Last error line from the cloud-agent log, when the check pulled one. */
   logTail?: string | null;
+  /** False when no admin key is stored for this stack, so probes cannot run. */
+  hasKey?: boolean;
 }): StackStep[] {
-  const { appName, machines, probes, logTail } = input;
+  const { appName, machines, probes, logTail, hasKey = true } = input;
   const created = Boolean(appName);
   const agentStep = machineStep("agent", "Cloud agent booting", machines, "identus-cloud-agent", "4 GB machine, JVM start");
   // While the agent is crash-looping, the health probes can only ever spin — keep
   // them pending so the failed boot step is the one thing the user reads.
   const bootFailed = agentStep.state === "failed";
   const agentUp = !bootFailed && machines?.find((m) => m.name === "identus-cloud-agent")?.state === "started";
+
+  // No stored admin key means every probe returns nothing forever; say so instead
+  // of spinning on "Agent health: system".
+  const missingKey = created && !hasKey;
+  const keyless = (step: StackStep): StackStep =>
+    missingKey
+      ? {
+          ...step,
+          state: "failed",
+          detail: "No admin key stored for this stack — use Reconnect to mint a new key on the running agent.",
+        }
+      : step;
 
   const steps: StackStep[] = [
     {
@@ -136,15 +150,18 @@ export function identusSteps(input: {
     machineStep("pg", "Postgres started", machines, "identus-postgres", "creates four databases and their app roles"),
     machineStep("prism", "PRISM node booting", machines, "identus-prism-node"),
     withLog(agentStep, logTail),
-    withLog(
-      probeStep("system", "Agent health: system", probes, "system", agentUp, "first boot migrates four databases, ~4 min"),
-      bootFailed ? null : logTail,
+    keyless(
+      withLog(
+        probeStep("system", "Agent health: system", probes, "system", agentUp, "first boot migrates four databases, ~4 min"),
+        bootFailed ? null : logTail,
+      ),
     ),
 
-    probeStep("did-registrar", "Agent health: DID registrar", probes, "did-registrar", agentUp),
-    probeStep("issuance", "Agent health: issuance", probes, "issuance", agentUp),
-    probeStep("connections", "Agent health: connections", probes, "connections", agentUp),
+    probeStep("did-registrar", "Agent health: DID registrar", probes, "did-registrar", agentUp && !missingKey),
+    probeStep("issuance", "Agent health: issuance", probes, "issuance", agentUp && !missingKey),
+    probeStep("connections", "Agent health: connections", probes, "connections", agentUp && !missingKey),
   ];
+
 
   return normalize(steps);
 }
