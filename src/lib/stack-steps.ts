@@ -225,6 +225,7 @@ export function midnightSteps(input: {
         indexerLog: string | null;
         nodeRpcFromNode: string | null;
         nodeRpcFromIndexer: string | null;
+        ips?: string | null;
       }
     | null
     | undefined;
