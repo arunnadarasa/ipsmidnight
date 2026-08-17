@@ -111,10 +111,22 @@ export function StackTimeline({
                   <span className="mt-0.5 block text-[11px] text-muted-foreground/70">{step.hint}</span>
                 ) : null}
                 {step.state === "failed" && step.detail ? (
-                  <span className="mt-1 block break-anywhere rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
-                    {step.detail}
+                  <span className="mt-1 block rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1">
+                    <span className="block max-h-40 overflow-y-auto break-anywhere whitespace-pre-wrap font-mono text-[11px] text-destructive">
+                      {step.detail}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-1 h-6 px-1.5 text-[11px] text-destructive hover:text-destructive"
+                      onClick={() => navigator.clipboard?.writeText(step.detail ?? "")}
+                    >
+                      <Copy className="mr-1 h-3 w-3" />
+                      Copy error
+                    </Button>
                   </span>
                 ) : null}
+
                 {step.state === "active" && step.detail ? (
                   <span className="mt-0.5 block break-anywhere text-[11px] text-muted-foreground/70">
                     {step.detail}
