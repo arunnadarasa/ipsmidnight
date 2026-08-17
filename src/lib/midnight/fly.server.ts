@@ -70,13 +70,26 @@ function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
           CFG_PRESET: "dev",
           RUST_LOG: "info",
           SHOW_CONFIG: "false",
+          SIDECHAIN_BLOCK_BENEFICIARY:
+            "04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e",
+        },
+        // --alice --force-authoring: seal blocks alone (otherwise the node boots as
+        // a plain full node and stays at #0). The IPv6 listen-addr is mandatory —
+        // Fly's 6PN network is IPv6-only and the default RPC socket is IPv4-only,
+        // so the indexer could never reach ws://…internal:9944.
+        init: {
+          cmd: [
+            "--alice",
+            "--force-authoring",
+            "--experimental-rpc-endpoint",
+            "listen-addr=[::]:9944,methods=unsafe",
+          ],
         },
         guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // 9944 stays private to the 6PN network; the indexer is the public surface.
         services: [
           {
-            ports: [
-              { port: 9944, handlers: ["tls", "http"] },
-            ],
+            ports: [],
             protocol: "tcp",
             internal_port: 9944,
             autostop: false,
@@ -118,6 +131,7 @@ function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
     config: {
       image: IMAGES.proof,
       init: { cmd: ["midnight-proof-server", "-v"] },
+      // Cold-loading the proving key needs ~1.5 GB; never shrink below 2 GB.
       guest: { cpu_kind: "performance", cpus: 2, memory_mb: 4096 },
       services: [
         {
