@@ -77,33 +77,31 @@ async function allocateIps(appName: string) {
   }
 }
 
-function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
+function machineConfig(
+  kind: "node" | "indexer" | "proof",
+  appName: string,
+  volumeId?: string | null,
+) {
   if (kind === "node") {
     return {
       name: "midnight-node",
       region: undefined,
       config: {
         image: IMAGES.node,
+        // Exactly the upstream standalone stack: the `dev` preset already
+        // authors blocks. Extra CLI arguments (--alice, --force-authoring,
+        // --experimental-rpc-endpoint) made the node dump its whole config and
+        // exit 1 in a reboot loop, so the machine runs with no init.cmd at all.
         env: {
           CFG_PRESET: "dev",
           RUST_LOG: "info",
-          SHOW_CONFIG: "false",
           SIDECHAIN_BLOCK_BENEFICIARY:
             "04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e",
         },
-        // --alice --force-authoring: seal blocks alone (otherwise the node boots as
-        // a plain full node and stays at #0). The IPv6 listen-addr is mandatory —
-        // Fly's 6PN network is IPv6-only and the default RPC socket is IPv4-only,
-        // so the indexer could never reach ws://…internal:9944.
-        init: {
-          cmd: [
-            "--alice",
-            "--force-authoring",
-            "--experimental-rpc-endpoint",
-            "listen-addr=[::]:9944,methods=unsafe",
-          ],
-        },
         guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // Chain data survives restarts and repairs, so a deployed contract
+        // address stays valid.
+        ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
         // 9944 stays private to the 6PN network; the indexer is the public surface.
         services: [
           {
@@ -117,6 +115,7 @@ function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
       },
     };
   }
+
   if (kind === "indexer") {
     return {
       name: "midnight-indexer",
