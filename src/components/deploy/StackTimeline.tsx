@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, Circle, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Circle, Copy, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatElapsed, stepProgress, type StackStep } from "@/lib/stack-steps";
 
