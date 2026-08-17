@@ -335,26 +335,43 @@ export async function identusMachineStates(appName: string) {
   }));
 }
 
-/** Picks the most diagnostic slice out of a raw log blob. */
+/**
+ * Picks the most diagnostic slice out of a raw log blob.
+ *
+ * Prefers a line that names the actual cause (a Postgres `ERROR:`, a `Caused by`,
+ * a "does not exist" / connection failure) over a generic ZIO wrapper or a bare
+ * `at …` stack frame — without this, a cause like
+ * `ERROR: role "pollux-application-user" does not exist` gets buried under the
+ * frames that follow it.
+ */
 function pickErrorText(raw: string): string | null {
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((l) => !/^at\s/.test(l));
   if (!lines.length) return null;
-  const re = /error|exception|caused by|fatal|failed|refused|unknownhost|denied|timeout|no such/i;
-  let idx = -1;
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line && re.test(line)) {
-      idx = i;
-      break;
+
+  const strong = /\bERROR:|caused by|does not exist|already exists|denied|refused|unknownhost|no such|out of memory|fatal/i;
+  const weak = /error|exception|failed|timeout/i;
+
+  const findLast = (re: RegExp) => {
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i];
+      if (line && re.test(line)) return i;
     }
-  }
+    return -1;
+  };
+
+  const idx = (() => {
+    const s = findLast(strong);
+    return s >= 0 ? s : findLast(weak);
+  })();
 
   const slice = idx >= 0 ? lines.slice(idx, idx + 4) : lines.slice(-4);
   return slice.join(" | ").slice(0, 700);
 }
+
 
 /**
  * The agent's own error text. The Machines API exposes no log endpoint, so the
