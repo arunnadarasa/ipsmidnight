@@ -369,8 +369,23 @@ function pickErrorText(raw: string): string | null {
   })();
 
   const slice = idx >= 0 ? lines.slice(idx, idx + 4) : lines.slice(-4);
-  return slice.join(" | ").slice(0, 700);
+
+  // A Postgres syntax/permission error only tells you *what* broke, not which
+  // Flyway migration ran it — carry the last "Migrating schema … to version …"
+  // line above it so the timeline names the failing migration file.
+  const migrating = /migrating schema|flyway.*version/i;
+  let prefix: string | null = null;
+  for (let i = Math.min(idx, lines.length - 1); i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line && migrating.test(line)) {
+      prefix = line;
+      break;
+    }
+  }
+  const parts = prefix ? [prefix, ...slice] : slice;
+  return parts.join(" | ").slice(0, 700);
 }
+
 
 
 /**
