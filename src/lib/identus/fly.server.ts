@@ -194,6 +194,7 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, walle
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
         DEFAULT_WALLET_ENABLED: "true",
+        DEFAULT_WALLET_SEED: walletSeed,
         DEFAULT_WALLET_AUTH_API_KEY: adminKey,
         ADMIN_TOKEN: adminKey,
         API_KEY_ENABLED: "true",
@@ -253,7 +254,7 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
 }
 
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
-  const spec = machineSpec(kind, appName, adminKey);
+  const spec = machineSpec(kind, appName, adminKey, await walletSeedFrom(adminKey));
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -272,8 +273,9 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const repaired: string[] = [];
+  const walletSeed = await walletSeedFrom(adminKey);
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey);
+    const spec = machineSpec(kind, appName, adminKey, walletSeed);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     if (existing) {
@@ -421,7 +423,7 @@ export async function repairAgentEndpoints(appName: string, adminKey: string, re
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const agent = machines.find((m) => m.name === "identus-cloud-agent");
   if (!agent) throw new Error("No cloud-agent machine on this app — provision it first.");
-  const spec = machineSpec("cloud-agent", appName, adminKey);
+  const spec = machineSpec("cloud-agent", appName, adminKey, await walletSeedFrom(adminKey));
   await fly(`/apps/${appName}/machines/${agent.id}`, {
     method: "POST",
     body: JSON.stringify({ name: spec.name, region, config: spec.config }),
