@@ -102,15 +102,19 @@ function machineConfig(
         // Chain data survives restarts and repairs, so a deployed contract
         // address stays valid.
         ...(volumeId ? { mounts: [{ volume: volumeId, path: NODE_DATA_PATH }] } : {}),
-        // 9944 stays private to the 6PN network; the indexer is the public surface.
+        // 9944 is never published publicly, but it MUST be declared as a service
+        // so the Fly proxy accepts private (flycast) traffic on that port and
+        // forwards it to the container over IPv4 — the only way the indexer can
+        // reach an IPv4-bound Substrate RPC on Fly's IPv6-only 6PN network.
         services: [
           {
-            ports: [],
+            ports: [{ port: 9944, handlers: [] }],
             protocol: "tcp",
             internal_port: 9944,
             autostop: false,
           },
         ],
+
         restart: { policy: "always" },
       },
     };
