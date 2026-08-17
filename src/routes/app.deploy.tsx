@@ -57,6 +57,7 @@ type ReadinessResult = {
       nodeLog: string | null;
       nodeRpcFromNode: string | null;
       nodeRpcFromIndexer: string | null;
+      ips?: string | null;
     } | null;
     exists?: boolean | null;
   };
