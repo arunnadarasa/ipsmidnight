@@ -282,13 +282,17 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
     if (existing && recreate) {
       // 404 means it is already gone — either way we continue to the create below.
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
-      await fly(`/apps/${appName}/machines`, { method: "POST", body });
+      const fresh = await fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
+      // Let Postgres finish initdb before the agent is restarted against it,
+      // otherwise the agent burns its first boot on "connection refused".
+      await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
     } else if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
     } else {
       await fly(`/apps/${appName}/machines`, { method: "POST", body });
     }
+
     repaired.push(spec.name);
   }
   return { appName, repaired };
