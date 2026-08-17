@@ -337,7 +337,7 @@ function StackDetail({
         <p className="text-xs text-muted-foreground sm:truncate">
           Region {stack.region} · provisioned {new Date(stack.created_at).toLocaleString()}
         </p>
-        <div className="flex items-center gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">Ⓐ
+        <div className="flex items-center gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">
           <Button variant="outline" size="sm" onClick={onCheck} disabled={checking}>
             {checking ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
             Check
