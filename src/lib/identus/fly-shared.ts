@@ -37,3 +37,23 @@ export function identusStackUrls(appName: string): IdentusStackUrls {
 }
 
 export const AGENT_MACHINES = ["identus-postgres", "identus-prism-node", "identus-cloud-agent"] as const;
+
+/** Image entrypoint of `identus/identus-cloud-agent` (sbt-native-packager layout). */
+export const AGENT_ENTRYPOINT = "/opt/docker/bin/identus-cloud-agent";
+
+/** Where the boot wrapper tees the agent's stdout/stderr inside the machine. */
+export const AGENT_LOG_PATH = "/tmp/agent-boot.log";
+
+/**
+ * Boot wrapper for the cloud agent. Fly's Machines API exposes no log endpoint,
+ * so the agent's own stdout is captured to a file we can read back over
+ * `machines/:id/exec` — that file is the only way to see the JVM exception that
+ * kills the process. `tail -F` keeps the live Fly log stream intact and the
+ * explicit `exit $c` preserves the real exit code (a pipe would mask it).
+ */
+export const AGENT_INIT_EXEC = [
+  "/bin/sh",
+  "-c",
+  `touch ${AGENT_LOG_PATH}; tail -n +1 -F ${AGENT_LOG_PATH} & ` +
+    `${AGENT_ENTRYPOINT} >> ${AGENT_LOG_PATH} 2>&1; c=$?; sleep 1; exit $c`,
+] as const;
