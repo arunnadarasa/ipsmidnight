@@ -339,6 +339,20 @@ export async function provisionIdentusStack(input: {
   return { ...identusStackUrls(appName), created, adminKey, machines };
 }
 
+/**
+ * Whether the Fly app itself exists. `null` means "cannot tell" (no token or an
+ * API error); only a definite 404 reports `false`.
+ */
+export async function identusAppExists(appName: string): Promise<boolean | null> {
+  if (!flyConfigured()) return null;
+  try {
+    const app = await flyOptional<{ name: string }>(`/apps/${appName}`);
+    return Boolean(app);
+  } catch {
+    return null;
+  }
+}
+
 export async function identusMachineStates(appName: string) {
   // No Fly token: there is nothing to read, and throwing here blanks the page.
   if (!flyConfigured()) return [];

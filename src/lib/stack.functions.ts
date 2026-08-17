@@ -105,21 +105,92 @@ export const provisionFullStack = createServerFn({ method: "POST" })
     };
   });
 
+/**
+ * Provisions one half of an existing stack — used when a destroy or a failed
+ * provision left, say, Identus running with no Midnight app at all.
+ */
+export const provisionHalf = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; kind: "identus" | "midnight"; region: string; label?: string }) =>
+    validatePrefix(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    if (data.kind === "identus") {
+      const { provisionIdentusStack, recordIdentusDeployment } = await import("@/lib/identus/fly.server");
+      const label = data.label?.trim() ? data.label.trim() : undefined;
+      const result = await provisionIdentusStack({ appPrefix: data.appPrefix, region: data.region });
+      await recordIdentusDeployment(
+        supabase,
+        userId,
+        { appPrefix: data.appPrefix, region: data.region, ...(label ? { label } : {}) },
+        result,
+      );
+      await supabase.from("activity_log").insert({
+        user_id: userId,
+        kind: "stack.provisioned",
+        summary: `Provisioned the Identus half of ${data.appPrefix} in ${data.region}`,
+        metadata: { appPrefix: data.appPrefix, region: data.region, half: "identus" } as never,
+      });
+      return { ok: true, appName: result.appName };
+    }
+
+    const { provisionStack } = await import("@/lib/midnight/fly.server");
+    const result = await provisionStack({ appPrefix: data.appPrefix, region: data.region });
+    const saved = await supabase.from("fly_deployments").upsert(
+      {
+        user_id: userId,
+        kind: "midnight",
+        app_prefix: data.appPrefix,
+        region: data.region,
+        status: "provisioning",
+        last_error: null,
+        indexer_url: result.indexerUrl,
+        indexer_ws_url: result.indexerWsUrl,
+        proof_url: result.proofUrl,
+        node_url: result.nodeUrl,
+        machines: result.machines as never,
+      },
+      { onConflict: "user_id,app_prefix,kind" },
+    );
+    if (saved.error) throw new Error(`Could not save the Midnight deployment record: ${saved.error.message}`);
+    await supabase.from("activity_log").insert({
+      user_id: userId,
+      kind: "stack.provisioned",
+      summary: `Provisioned the Midnight half of ${data.appPrefix} in ${data.region}`,
+      metadata: { appPrefix: data.appPrefix, region: data.region, half: "midnight" } as never,
+    });
+    return { ok: true, appName: result.appName };
+  });
+
 /** Combined readiness check for both halves of an IPS stack. */
 export const checkFullStack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { appPrefix: string }) => input)
   .handler(async ({ data, context }) => {
-    const { identusMachineStates, agentLogTail } = await import("@/lib/identus/fly.server");
+    const { identusMachineStates, agentLogTail, identusAppExists } = await import("@/lib/identus/fly.server");
     const { probeAgent } = await import("@/lib/identus/cloud-agent.server");
     const { identusStackUrls } = await import("@/lib/identus/fly-shared");
-    const { machineStates, probeStack, midnightDiagnostics } = await import("@/lib/midnight/fly.server");
+    const { machineStates, probeStack, midnightDiagnostics, appExists } = await import("@/lib/midnight/fly.server");
     const { stackUrls } = await import("@/lib/midnight/shared");
 
     const { supabase, userId } = context;
 
     const identusUrls = identusStackUrls(`${data.appPrefix}-identus`);
     const midnightUrls = stackUrls(`${data.appPrefix}-midnight`);
+
+    // Region is needed to upsert a half whose row was removed by an earlier destroy.
+    const { data: rows } = await supabase
+      .from("fly_deployments")
+      .select("kind,region")
+      .eq("user_id", userId)
+      .eq("app_prefix", data.appPrefix);
+    const region = rows?.[0]?.region ?? "lhr";
+    // A destroy deletes the rows; a check that raced it must not resurrect a
+    // stack the user just tore down, so only write a row that already exists
+    // (or one whose Fly app is actually there).
+    const hasRow = (kind: string) => Boolean(rows?.some((r) => r.kind === kind));
 
     // Identus half
     const { data: conn } = await supabase
@@ -132,20 +203,39 @@ export const checkFullStack = createServerFn({ method: "POST" })
     // call must not take down the whole check (that is what left the timeline
     // spinning with no error).
     const identusMachines = await identusMachineStates(identusUrls.appName).catch(() => []);
+    // A definite 404 on the app is what separates "not provisioned" from
+    // "provisioning" — the app *name* always exists, so it proves nothing.
+    const identusExists = await identusAppExists(identusUrls.appName);
     const identusHealth = conn?.api_key
       ? await probeAgent({ baseUrl: identusUrls.agentUrl, apiKey: conn.api_key }).catch(() => ({ probes: [], ready: false }))
       : { probes: [], ready: false };
-    const identusStatus = identusHealth.ready ? "ready" : identusMachines.length ? "provisioning" : "unknown";
+    const identusStatus = identusHealth.ready
+      ? "ready"
+      : identusMachines.length
+        ? "provisioning"
+        : identusExists === false
+          ? "absent"
+          : "unknown";
     // Only pull logs when something is wrong — that is the one moment the
     // stack trace matters, and it keeps the happy-path check fast.
-    const identusLog = identusHealth.ready ? null : await agentLogTail(identusUrls.appName).catch(() => null);
+    const identusLog =
+      identusHealth.ready || identusExists === false ? null : await agentLogTail(identusUrls.appName).catch(() => null);
 
-    await supabase
-      .from("fly_deployments")
-      .update({ status: identusStatus, machines: identusMachines as never })
-      .eq("user_id", userId)
-      .eq("kind", "identus")
-      .eq("app_prefix", data.appPrefix);
+    if (hasRow("identus") || identusExists !== false) {
+      await supabase.from("fly_deployments").upsert(
+        {
+          user_id: userId,
+          kind: "identus",
+          app_prefix: data.appPrefix,
+          region,
+          status: identusStatus,
+          machines: identusMachines as never,
+          agent_url: identusUrls.agentUrl,
+          didcomm_url: identusUrls.didcommUrl,
+        },
+        { onConflict: "user_id,app_prefix,kind" },
+      );
+    }
     if (conn?.id) {
       await supabase
         .from("agent_connections")
@@ -155,26 +245,47 @@ export const checkFullStack = createServerFn({ method: "POST" })
 
     // Midnight half
     const midnightMachines = await machineStates(midnightUrls.appName).catch(() => []);
-    const midnightProbes = await probeStack({ indexerUrl: midnightUrls.indexerUrl, proofUrl: midnightUrls.proofUrl });
+    const midnightExists = await appExists(midnightUrls.appName);
+    const midnightProbes =
+      midnightExists === false
+        ? { indexer: { ok: false, detail: "Fly app does not exist", blockHeight: null }, proof: { ok: false, detail: "Fly app does not exist" }, node: { ok: false, detail: "Fly app does not exist" } }
+        : await probeStack({ indexerUrl: midnightUrls.indexerUrl, proofUrl: midnightUrls.proofUrl });
 
     const midnightReady = midnightProbes.indexer.ok && midnightProbes.proof.ok;
-    const midnightStatus = midnightReady ? "ready" : midnightMachines.length ? "provisioning" : "unknown";
+    const midnightStatus = midnightReady
+      ? "ready"
+      : midnightMachines.length
+        ? "provisioning"
+        : midnightExists === false
+          ? "absent"
+          : "unknown";
     // Only when something is wrong: the indexer log plus the node-RPC reachability
     // check are the only signals that explain an indexer with zero blocks.
-    const midnightDiag = midnightReady ? null : await midnightDiagnostics(midnightUrls.appName).catch(() => null);
+    const midnightDiag =
+      midnightReady || midnightExists === false ? null : await midnightDiagnostics(midnightUrls.appName).catch(() => null);
 
-    await supabase
-      .from("fly_deployments")
-      .update({
-        status: midnightStatus,
-        machines: midnightMachines as never,
-        // Keeps the stored RPC address in step with the current wiring (the node
-        // RPC moved from the 6PN name to the proxy-backed flycast address).
-        node_url: midnightUrls.nodeUrl,
-      })
-      .eq("user_id", userId)
-      .eq("kind", "midnight")
-      .eq("app_prefix", data.appPrefix);
+    // Upsert, not update: a destroy removes the row, and an update would then
+    // match nothing — leaving the console with no persisted state at all.
+    if (hasRow("midnight") || midnightExists !== false) {
+      await supabase.from("fly_deployments").upsert(
+        {
+          user_id: userId,
+          kind: "midnight",
+          app_prefix: data.appPrefix,
+          region,
+          status: midnightStatus,
+          machines: midnightMachines as never,
+          indexer_url: midnightUrls.indexerUrl,
+          indexer_ws_url: midnightUrls.indexerWsUrl,
+          proof_url: midnightUrls.proofUrl,
+          // Keeps the stored RPC address in step with the current wiring (the node
+          // RPC moved from the 6PN name to the proxy-backed flycast address).
+          node_url: midnightUrls.nodeUrl,
+        },
+        { onConflict: "user_id,app_prefix,kind" },
+      );
+    }
+
 
 
     return {
@@ -188,8 +299,9 @@ export const checkFullStack = createServerFn({ method: "POST" })
         // Without a stored admin key the probes cannot run at all — the UI needs
         // to say "reconnect" rather than show a spinner that never resolves.
         hasKey: Boolean(conn?.api_key),
+        exists: identusExists,
       },
-      midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady, diagnostics: midnightDiag },
+      midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady, diagnostics: midnightDiag, exists: midnightExists },
       allReady: identusHealth.ready && midnightReady,
       appPrefix: data.appPrefix,
     };

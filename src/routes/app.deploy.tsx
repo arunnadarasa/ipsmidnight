@@ -27,10 +27,11 @@ import {
   repairMidnightOnly,
 
   reconnectStack,
+  provisionHalf,
   listStacks,
 } from "@/lib/stack.functions";
 import { StackTimeline } from "@/components/deploy/StackTimeline";
-import { identusSteps, midnightSteps, type StackStep } from "@/lib/stack-steps";
+import { identusSteps, midnightSteps, isNotProvisioned, type StackStep } from "@/lib/stack-steps";
 
 type MachineLike = { name: string; id: string; state: string; region?: string | null };
 
@@ -43,6 +44,7 @@ type ReadinessResult = {
     ready: boolean;
     logTail?: string | null;
     hasKey?: boolean;
+    exists?: boolean | null;
   };
   midnight: {
     urls: { appName: string; indexerUrl: string; indexerWsUrl: string; proofUrl: string; nodeUrl: string };
@@ -56,6 +58,7 @@ type ReadinessResult = {
       nodeRpcFromNode: string | null;
       nodeRpcFromIndexer: string | null;
     } | null;
+    exists?: boolean | null;
   };
 
   allReady: boolean;
@@ -99,6 +102,7 @@ function DeployConsole() {
   const repairMidnight = useServerFn(repairMidnightOnly);
 
   const reconnect = useServerFn(reconnectStack);
+  const provisionOneHalf = useServerFn(provisionHalf);
 
 
 
@@ -208,6 +212,21 @@ function DeployConsole() {
   });
 
 
+  // Brings back a half whose Fly app no longer exists (destroyed, or a provision
+  // that never got off the ground) without touching the healthy half.
+  const provisionHalfMut = useMutation({
+    mutationFn: async (kind: "identus" | "midnight") => {
+      if (!selected) throw new Error("No stack selected");
+      return provisionOneHalf({ data: { appPrefix: selected.appPrefix, kind, region: selected.region } });
+    },
+    onSuccess: (_res, kind) => {
+      toast.success(`${kind === "identus" ? "Identus" : "Midnight"} half provisioning — machines are booting.`);
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      void readiness.refetch();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Provisioning failed"),
+  });
+
   const destroyMut = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("No stack selected");
@@ -282,6 +301,8 @@ function DeployConsole() {
 
               onReconnect={() => reconnectMut.mutate()}
               reconnectLoading={reconnectMut.isPending}
+              onProvisionHalf={(kind) => provisionHalfMut.mutate(kind)}
+              provisionHalfLoading={provisionHalfMut.isPending}
 
             />
           ) : null}
@@ -416,6 +437,8 @@ function StackDetail({
 
   onReconnect,
   reconnectLoading,
+  onProvisionHalf,
+  provisionHalfLoading,
 }: {
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
@@ -433,6 +456,8 @@ function StackDetail({
 
   onReconnect: () => void;
   reconnectLoading: boolean;
+  onProvisionHalf: (kind: "identus" | "midnight") => void;
+  provisionHalfLoading: boolean;
 
 }) {
   const identus = readiness?.identus;
@@ -493,54 +518,74 @@ function StackDetail({
 
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <HalfCard
-          title="Identus Cloud Agent"
-          subtitle="Credential issuance"
-          status={identus?.status ?? stack.identus?.status ?? "unknown"}
-          ready={identus?.ready ?? false}
-          loading={readinessLoading}
-          url={identus?.urls.agentUrl ?? stack.identus?.agent_url ?? null}
-          urlLabel="agent"
-          error={stack.identus?.last_error}
-          readyTo={allReady ? "/app/identus" : null}
-          readyLabel="Publish DID & issue"
-          machines={identus?.machines}
-          steps={identusSteps({
+        {(() => {
+          const identusStepList = identusSteps({
             appName: identus?.urls.appName ?? `${stack.appPrefix}-identus`,
             machines: identus?.machines,
             probes: identus?.health.probes,
             logTail: identus?.logTail ?? null,
             hasKey: identus?.hasKey ?? true,
-          })}
-          startedAt={stack.created_at}
-          regionLabel={`Region ${stack.region}`}
-          onRetry={onCheck}
-          retrying={checking}
-        />
-        <HalfCard
-          title="Midnight Undeployed"
-          subtitle="On-chain anchoring"
-          status={midnight?.status ?? stack.midnight?.status ?? "unknown"}
-          ready={midnight?.ready ?? false}
-          loading={readinessLoading}
-          url={midnight?.urls.indexerUrl ?? stack.midnight?.indexer_url ?? null}
-          urlLabel="indexer"
-          error={stack.midnight?.last_error}
-          readyTo={allReady ? "/app/midnight" : null}
-          readyLabel="Deploy contract & anchor"
-          machines={midnight?.machines}
-          steps={midnightSteps({
+            exists: identus?.exists ?? null,
+          });
+          const midnightStepList = midnightSteps({
             appName: midnight?.urls.appName ?? `${stack.appPrefix}-midnight`,
             machines: midnight?.machines,
             probes: midnight?.probes,
             diagnostics: midnight?.diagnostics ?? null,
-          })}
-
-          startedAt={stack.created_at}
-          regionLabel={`Region ${stack.region}`}
-          onRetry={onCheck}
-          retrying={checking}
-        />
+            exists: midnight?.exists ?? null,
+          });
+          const identusAbsent = identus?.exists === false && isNotProvisioned(identusStepList);
+          const midnightAbsent = midnight?.exists === false && isNotProvisioned(midnightStepList);
+          return (
+            <>
+              <HalfCard
+                title="Identus Cloud Agent"
+                subtitle="Credential issuance"
+                status={identusAbsent ? "not provisioned" : identus?.status ?? stack.identus?.status ?? "unknown"}
+                ready={identus?.ready ?? false}
+                loading={readinessLoading}
+                // A derived URL for an app that does not exist is a dead link.
+                url={identusAbsent ? null : identus?.urls.agentUrl ?? stack.identus?.agent_url ?? null}
+                urlLabel="agent"
+                error={stack.identus?.last_error}
+                readyTo={allReady ? "/app/identus" : null}
+                readyLabel="Publish DID & issue"
+                machines={identus?.machines}
+                steps={identusStepList}
+                startedAt={identusAbsent ? null : stack.created_at}
+                regionLabel={`Region ${stack.region}`}
+                onRetry={onCheck}
+                retrying={checking}
+                absent={identusAbsent}
+                onProvision={() => onProvisionHalf("identus")}
+                provisionLoading={provisionHalfLoading}
+                provisionLabel="Provision Identus"
+              />
+              <HalfCard
+                title="Midnight Undeployed"
+                subtitle="On-chain anchoring"
+                status={midnightAbsent ? "not provisioned" : midnight?.status ?? stack.midnight?.status ?? "unknown"}
+                ready={midnight?.ready ?? false}
+                loading={readinessLoading}
+                url={midnightAbsent ? null : midnight?.urls.indexerUrl ?? stack.midnight?.indexer_url ?? null}
+                urlLabel="indexer"
+                error={stack.midnight?.last_error}
+                readyTo={allReady ? "/app/midnight" : null}
+                readyLabel="Deploy contract & anchor"
+                machines={midnight?.machines}
+                steps={midnightStepList}
+                startedAt={midnightAbsent ? null : stack.created_at}
+                regionLabel={`Region ${stack.region}`}
+                onRetry={onCheck}
+                retrying={checking}
+                absent={midnightAbsent}
+                onProvision={() => onProvisionHalf("midnight")}
+                provisionLoading={provisionHalfLoading}
+                provisionLabel="Provision Midnight"
+              />
+            </>
+          );
+        })()}
       </div>
 
       {allReady ? (
@@ -582,6 +627,10 @@ function HalfCard({
   regionLabel,
   onRetry,
   retrying,
+  absent,
+  onProvision,
+  provisionLoading,
+  provisionLabel,
 }: {
   title: string;
   subtitle: string;
@@ -599,6 +648,11 @@ function HalfCard({
   regionLabel?: string | null;
   onRetry?: () => void;
   retrying?: boolean;
+  /** The Fly app for this half does not exist — nothing is booting. */
+  absent?: boolean;
+  onProvision?: () => void;
+  provisionLoading?: boolean;
+  provisionLabel?: string;
 }) {
   const tone = ready ? "text-success" : status === "error" ? "text-destructive" : "text-muted-foreground";
   return (
@@ -630,13 +684,33 @@ function HalfCard({
           </p>
         ) : null}
 
-        <StackTimeline
-          steps={steps}
-          startedAt={startedAt}
-          {...(regionLabel ? { regionLabel } : {})}
-          {...(onRetry ? { onRetry } : {})}
-          {...(retrying !== undefined ? { retrying } : {})}
-        />
+        {absent ? (
+          <div className="space-y-3 rounded-md border border-border bg-card/40 px-3 py-3">
+            <p className="text-xs text-muted-foreground">
+              No Fly app exists for this half — it was either destroyed or never finished provisioning. Nothing is
+              booting, so there is nothing to repair.
+            </p>
+            {onProvision ? (
+              <Button size="sm" onClick={onProvision} disabled={provisionLoading} className="w-full">
+                {provisionLoading ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Rocket className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {provisionLabel ?? "Provision"}
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <StackTimeline
+            steps={steps}
+            startedAt={startedAt}
+            {...(regionLabel ? { regionLabel } : {})}
+            {...(onRetry ? { onRetry } : {})}
+            {...(retrying !== undefined ? { retrying } : {})}
+          />
+        )}
+
 
         {machines?.length ? (
           <details className="rounded-md border border-border bg-card/40 px-2.5 py-1.5">

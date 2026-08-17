@@ -305,6 +305,21 @@ export function exitSummary(m: FlyMachine): { exitCode: number | null; oomKilled
   return { exitCode, oomKilled, restarts, detail };
 }
 
+/**
+ * Whether the Fly app itself exists. `null` means "cannot tell" (no token, or the
+ * API errored) — only a definite 404 reports `false`, so the UI never claims a
+ * stack is missing on the back of a transient failure.
+ */
+export async function appExists(appName: string): Promise<boolean | null> {
+  if (!flyConfigured()) return null;
+  try {
+    const app = await flyOptional<{ name: string }>(`/apps/${appName}`);
+    return Boolean(app);
+  } catch {
+    return null;
+  }
+}
+
 export async function machineStates(appName: string) {
   if (!flyConfigured()) return [];
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
