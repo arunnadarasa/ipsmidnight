@@ -24,16 +24,21 @@ export const INDEXER_ENV = {
 } as const;
 
 /**
- * Private address of the node's RPC, used by both indexer node URLs.
+ * Address of the node's RPC, used by both indexer node URLs.
  *
  * NOT the 6PN `<group>.process.<app>.internal` name: that resolves to IPv6 only,
- * and the node's RPC listener binds IPv4 (upstream publishes 9944 through Docker
- * port mapping), so an IPv6 connect is refused and the indexer silently serves
- * an empty chain. `<app>.flycast` goes through the Fly proxy, which reaches the
- * container over IPv4 — so the indexer connects regardless of the node's bind.
+ * while the node's RPC listener binds IPv4, so an IPv6 connect is refused and
+ * the indexer silently serves an empty chain. `<app>.flycast` was the next
+ * attempt, but it depends on a private-IP allocation that can silently be
+ * missing — the observed failure was `000` on flycast even from inside the app.
+ *
+ * The Fly edge always terminates on IPv4 inside the container, needs no private
+ * IP, and works from any machine, so the node RPC is published on 9944 and both
+ * the indexer and the deploy script dial it over TLS. The chain is a throwaway
+ * `CFG_PRESET=dev` chain with no funds, so a public dev RPC is acceptable here.
  */
 export function nodeRpcWsUrl(appName: string) {
-  return `ws://${appName}.flycast:9944`;
+  return `wss://${appName}.fly.dev:9944`;
 }
 
 
