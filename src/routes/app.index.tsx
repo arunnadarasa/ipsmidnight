@@ -67,12 +67,12 @@ function Dashboard() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {stats.map(({ label, value, icon: Icon, to }) => (
-          <Link key={label} to={to} className="panel p-4 transition-colors hover:border-primary/50">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">{label}</span>
-              <Icon className="h-4 w-4 text-primary" />
+          <Link key={label} to={to} className="panel p-3 transition-colors hover:border-primary/50 sm:p-4">
+            <div className="flex items-start justify-between gap-2">
+              <span className="min-w-0 text-xs text-muted-foreground">{label}</span>
+              <Icon className="h-4 w-4 shrink-0 text-primary" />
             </div>
             <p className="mt-2 font-display text-2xl font-semibold">{value}</p>
           </Link>
