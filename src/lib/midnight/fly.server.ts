@@ -146,6 +146,19 @@ function machineConfig(kind: "node" | "indexer" | "proof", appName: string) {
   };
 }
 
+/**
+ * Fly private DNS resolves `<group>.process.<app>.internal` from the machine's
+ * `fly_process_group` metadata, not its name — without it the indexer can never
+ * reach ws://midnight-node.process.<app>.internal:9944.
+ */
+function machineBody(spec: { name: string; config: Record<string, unknown> }, region: string) {
+  return JSON.stringify({
+    name: spec.name,
+    region,
+    config: { ...spec.config, metadata: { fly_process_group: spec.name } },
+  });
+}
+
 async function ensureMachine(
   appName: string,
   kind: "node" | "indexer" | "proof",
@@ -154,17 +167,31 @@ async function ensureMachine(
   const spec = machineConfig(kind, appName);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
+  const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
   if (existing) {
-    await fly(`/apps/${appName}/machines/${existing.id}`, {
-      method: "POST",
-      body: JSON.stringify({ name: spec.name, region, config: spec.config }),
-    });
+    await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
     return { ...existing, state: "updating" };
   }
-  return fly<FlyMachine>(`/apps/${appName}/machines`, {
-    method: "POST",
-    body: JSON.stringify({ name: spec.name, region, config: spec.config }),
-  });
+  return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
+}
+
+/** Re-applies corrected specs to an existing app and restarts each machine. */
+export async function repairMidnightStack(appName: string, region: string) {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const repaired: string[] = [];
+  for (const kind of ["node", "indexer", "proof"] as const) {
+    const spec = machineConfig(kind, appName);
+    const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
+    const existing = machines.find((m) => m.name === spec.name);
+    if (existing) {
+      await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
+      await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
+    } else {
+      await fly(`/apps/${appName}/machines`, { method: "POST", body });
+    }
+    repaired.push(spec.name);
+  }
+  return { appName, repaired };
 }
 
 export type ProvisionResult = StackUrls & {
