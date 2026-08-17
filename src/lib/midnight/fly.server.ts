@@ -22,6 +22,11 @@ type FlyMachine = {
 };
 
 
+/** Read-only callers use this to degrade gracefully instead of throwing. */
+export function flyConfigured() {
+  return Boolean(process.env["FLY_API_TOKEN"]);
+}
+
 function token() {
   const t = process.env["FLY_API_TOKEN"];
   if (!t) throw new Error("FLY_API_TOKEN is not configured for this project.");
@@ -301,6 +306,7 @@ export function exitSummary(m: FlyMachine): { exitCode: number | null; oomKilled
 }
 
 export async function machineStates(appName: string) {
+  if (!flyConfigured()) return [];
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   return machines.map((m) => ({
     name: m.name,
@@ -424,6 +430,7 @@ export async function verifyAnchorOnChain(input: {
  * chain is invisible — the GraphQL endpoint answers happily either way.
  */
 export async function midnightDiagnostics(appName: string) {
+  if (!flyConfigured()) return null;
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const indexer = machines.find((m) => m.name === "midnight-indexer");
   const node = machines.find((m) => m.name === "midnight-node");
