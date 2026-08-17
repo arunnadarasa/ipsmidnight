@@ -317,6 +317,7 @@ export async function provisionIdentusStack(input: {
 }
 
 export async function identusMachineStates(appName: string) {
+
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   return machines.map((m) => ({
     name: m.name,
