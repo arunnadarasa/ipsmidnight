@@ -686,7 +686,7 @@ function HalfCard({
         ) : null}
 
         {absent ? (
-          <div className="space-y-3 rounded-md border border-border bg-card/40 px-3 py-3">
+          <div className="space-y-3 rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-3">
             <p className="text-xs text-muted-foreground">
               No Fly app exists for this half — it was either destroyed or never finished provisioning. Nothing is
               booting, so there is nothing to repair.
@@ -714,7 +714,7 @@ function HalfCard({
 
 
         {machines?.length ? (
-          <details className="rounded-md border border-border bg-card/40 px-2.5 py-1.5">
+          <details className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-2.5 py-1.5">
             <summary className="cursor-pointer text-[11px] text-muted-foreground">Fly machines ({machines.length})</summary>
             <ul className="mt-1.5 space-y-1">
               {machines.map((m) => (

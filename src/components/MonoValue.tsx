@@ -32,7 +32,7 @@ export function TruncatedMono({ value, label, head = 10, tail = 6, className }: 
       {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
       <code
         title={value ?? undefined}
-        className="min-w-0 truncate rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-xs text-foreground/90"
+        className="min-w-0 truncate rounded-md border border-border/60 bg-secondary/60 px-1.5 py-0.5 font-mono text-xs text-foreground/90"
       >
         {shortenId(value, head, tail)}
       </code>
@@ -41,7 +41,7 @@ export function TruncatedMono({ value, label, head = 10, tail = 6, className }: 
           type="button"
           onClick={copy}
           aria-label="Copy value"
-          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-all hover:bg-secondary hover:text-primary active:scale-90"
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
         </button>
@@ -50,14 +50,30 @@ export function TruncatedMono({ value, label, head = 10, tail = 6, className }: 
   );
 }
 
-export function StatusDot({ status }: { status: "ok" | "pending" | "error" | "idle" }) {
+export function StatusDot({
+  status,
+  size = "sm",
+}: {
+  status: "ok" | "pending" | "error" | "idle";
+  size?: "sm" | "md";
+}) {
   const tone =
     status === "ok"
-      ? "bg-success"
+      ? "bg-success text-success"
       : status === "error"
-        ? "bg-destructive"
+        ? "bg-destructive text-destructive"
         : status === "pending"
-          ? "bg-warning animate-pulse"
-          : "bg-muted-foreground/50";
-  return <span className={cn("inline-block h-2 w-2 shrink-0 rounded-full", tone)} aria-hidden />;
+          ? "bg-warning text-warning"
+          : "bg-muted-foreground/50 text-muted-foreground";
+  return (
+    <span
+      className={cn(
+        "relative inline-block shrink-0 rounded-full",
+        size === "md" ? "h-2.5 w-2.5" : "h-2 w-2",
+        tone,
+        (status === "ok" || status === "pending") && "pulse-ring",
+      )}
+      aria-hidden
+    />
+  );
 }

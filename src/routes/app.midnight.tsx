@@ -214,7 +214,7 @@ function MidnightConsole() {
                   },
                 ].map((row) => (
 
-                  <li key={row.label} className="rounded-md border border-border bg-card/40 px-3 py-2">
+                  <li key={row.label} className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2">
                     <div className="flex items-center gap-2">
                       <StatusDot
                         status={row.probe ? (row.probe.ok ? "ok" : "error") : "idle"}
@@ -232,7 +232,7 @@ function MidnightConsole() {
               <ul className="grid gap-2 sm:grid-cols-3">
                 {(health.data?.machines ?? (deployment.machines as { name: string; state: string }[] | null) ?? []).map(
                   (m) => (
-                    <li key={m.name} className="rounded-md border border-border bg-card/40 px-3 py-2">
+                    <li key={m.name} className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2">
                       <p className="truncate text-xs text-muted-foreground">{m.name}</p>
                       <p className="mt-0.5 truncate text-sm">{m.state}</p>
                     </li>
@@ -331,7 +331,7 @@ function MidnightConsole() {
               {anchors.map((a) => (
                 <li
                   key={a.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-border bg-card/40 px-3 py-2"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2"
                 >
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">

@@ -241,7 +241,7 @@ function IdentusConsole() {
                     return (
                       <li
                         key={a.id}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-border bg-card/40 px-3 py-2"
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2"
                       >
                         <div className="min-w-0 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -357,7 +357,7 @@ function IdentusConsole() {
         {creds.data?.length ? (
           <ul className="space-y-2">
             {creds.data.map((c) => (
-              <li key={c.id} className="space-y-1 rounded-md border border-border bg-card/40 px-3 py-2">
+              <li key={c.id} className="space-y-1 rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Fingerprint className="h-3.5 w-3.5 shrink-0 text-primary" />
                   <Badge variant="secondary" className="text-[11px]">

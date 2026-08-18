@@ -1,6 +1,17 @@
 import type { ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Activity, Cloud, FileHeart, Github, IdCard, LayoutDashboard, LogOut, Menu, Moon, ShieldCheck } from "lucide-react";
+import {
+  Activity,
+  Cloud,
+  FileHeart,
+  Github,
+  IdCard,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Moon,
+  ShieldCheck,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { signOut } from "@/hooks/useAuth";
@@ -28,13 +39,24 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             to={to}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
+              "group relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-all duration-200",
               active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                ? "bg-primary/10 font-medium text-primary shadow-[inset_0_0_0_1px_var(--hairline)]"
+                : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
             )}
           >
-            <Icon className="h-4 w-4 shrink-0" />
+            <span
+              className={cn(
+                "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-all duration-300",
+                active ? "opacity-100" : "h-0 opacity-0",
+              )}
+            />
+            <Icon
+              className={cn(
+                "h-4 w-4 shrink-0 transition-transform duration-200",
+                !active && "group-hover:scale-110",
+              )}
+            />
             <span className="truncate">{label}</span>
           </Link>
         );
@@ -43,62 +65,106 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function BrandMark({ size = "md" }: { size?: "sm" | "md" }) {
+  return (
+    <span
+      className={cn(
+        "grid place-items-center rounded-xl text-primary-foreground shadow-[var(--shadow-glow)]",
+        size === "md" ? "h-9 w-9" : "h-7 w-7",
+      )}
+      style={{ background: "var(--gradient-primary)" }}
+    >
+      <Activity className={size === "md" ? "h-4.5 w-4.5" : "h-3.5 w-3.5"} />
+    </span>
+  );
+}
+
 export function AppShell({ children, email }: { children: ReactNode; email?: string | null }) {
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-4 lg:flex">
-        <Link to="/" className="mb-6 flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-primary font-display text-sm font-bold text-primary-foreground">
-            IPS
-          </span>
-          <span className="font-display text-sm font-semibold">IPS Console</span>
+      <aside className="relative hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-4 lg:flex">
+        <div className="pointer-events-none absolute inset-0 grid-backdrop opacity-50" />
+        <Link to="/" className="relative mb-7 flex items-center gap-2.5">
+          <BrandMark />
+          <span className="font-display text-[0.95rem] font-bold tracking-tight">IPS Compass</span>
         </Link>
-        <NavLinks />
-        <div className="mt-auto space-y-2 pt-6">
+        <div className="relative">
+          <NavLinks />
+        </div>
+        <div className="relative mt-auto space-y-2 pt-6">
           <a
             href="https://github.com/arunnadarasa/ipsmidnight"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           >
             <Github className="h-4 w-4 shrink-0" />
             <span className="truncate">View source on GitHub</span>
           </a>
-          <p className="truncate px-3 text-xs text-muted-foreground">{email ?? "Signed in"}</p>
-          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => void signOut()}>
-            <LogOut className="mr-2 h-4 w-4" /> Sign out
-          </Button>
+          <div className="rounded-xl border border-sidebar-border bg-card/60 p-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              Signed in
+            </p>
+            <p className="mt-0.5 truncate text-xs font-medium">{email ?? "Clinician"}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 h-8 w-full justify-start px-2 text-muted-foreground hover:text-foreground"
+              onClick={() => void signOut()}
+            >
+              <LogOut className="mr-2 h-3.5 w-3.5" /> Sign out
+            </Button>
+          </div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
+        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border px-3 py-2.5 panel-glass rounded-none shadow-none lg:hidden">
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon" aria-label="Open navigation" className="h-10 w-10 shrink-0">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Open navigation"
+                className="h-10 w-10 shrink-0 rounded-xl"
+              >
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-[17rem] bg-sidebar p-4">
-              <SheetTitle className="mb-4 font-display text-sm">IPS Console</SheetTitle>
+            <SheetContent side="left" className="w-[17.5rem] bg-sidebar p-4">
+              <SheetTitle className="mb-5 flex items-center gap-2 font-display text-sm font-bold tracking-tight">
+                <BrandMark size="sm" />
+                IPS Compass
+              </SheetTitle>
               <NavLinks />
-              <Button variant="ghost" size="sm" className="mt-6 w-full justify-start" onClick={() => void signOut()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-6 w-full justify-start"
+                onClick={() => void signOut()}
+              >
                 <LogOut className="mr-2 h-4 w-4" /> Sign out
               </Button>
               <a
                 href="https://github.com/arunnadarasa/ipsmidnight"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-2 flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+                className="mt-2 flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
               >
                 <Github className="h-4 w-4 shrink-0" />
                 <span className="truncate">View source on GitHub</span>
               </a>
             </SheetContent>
           </Sheet>
-          <span className="min-w-0 truncate font-display text-sm font-semibold">IPS Console</span>
+          <span className="flex min-w-0 items-center gap-2 truncate font-display text-sm font-bold tracking-tight">
+            <BrandMark size="sm" />
+            IPS Compass
+          </span>
         </header>
-        <main className="min-w-0 flex-1 px-3 py-4 pb-24 sm:p-6 lg:p-8">{children}</main>
+        <main className="relative min-w-0 flex-1 px-3 py-5 pb-24 sm:p-6 lg:p-9">
+          <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-72 hero-mesh opacity-70" />
+          {children}
+        </main>
       </div>
     </div>
   );

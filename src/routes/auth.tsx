@@ -92,29 +92,36 @@ function AuthPage() {
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="hidden flex-col justify-between border-r border-border bg-sidebar p-10 lg:flex">
-        <Link to="/" className="font-display text-sm font-semibold">
-          ← IPS Console
+      <div className="relative hidden flex-col justify-between overflow-hidden border-r border-border bg-sidebar p-10 lg:flex">
+        <div className="pointer-events-none absolute inset-0 hero-mesh" />
+        <div className="pointer-events-none absolute inset-0 grid-backdrop opacity-60" />
+        <Link
+          to="/"
+          className="relative font-display text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+        >
+          ← IPS Compass
         </Link>
-        <div className="max-w-sm">
-          <h2 className="font-display text-3xl font-semibold leading-tight">
-            Patient summaries that travel with proof, not with data.
+        <div className="relative max-w-sm">
+          <h2 className="font-display text-[2.1rem] font-bold leading-[1.15] tracking-tight">
+            Patient summaries that travel with{" "}
+            <span className="text-gradient">proof, not with data.</span>
           </h2>
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="mt-5 text-sm leading-relaxed text-muted-foreground">
             Compose an IPS FHIR bundle, issue it as an Identus verifiable credential, and anchor only
             a commitment on the Midnight Undeployed network. Clinical content never leaves your
             workspace.
           </p>
         </div>
-        <p className="font-mono text-xs text-muted-foreground">
+        <p className="relative font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
           Identus 1.40 · Compact 0.23 · Midnight Undeployed
         </p>
       </div>
 
-      <div className="flex items-center justify-center p-6">
-        <div className="w-full max-w-sm">
-          <h1 className="font-display text-2xl font-semibold">Sign in</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <div className="relative flex items-center justify-center p-6">
+        <div className="pointer-events-none absolute inset-0 hero-mesh opacity-60 lg:hidden" />
+        <div className="panel relative w-full max-w-sm p-6 sm:p-7">
+          <h1 className="font-display text-2xl font-bold tracking-tight">Sign in</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
             Use email and password, or continue with Google.
           </p>
 
