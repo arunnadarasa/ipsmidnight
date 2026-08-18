@@ -369,10 +369,38 @@ export async function startVerifyJob(input: {
 }
 
 
+/**
+ * Wipes the installed toolchain (node_modules, npm cache, ready marker) while
+ * keeping the volume, the private state and any deployed contract. This is the
+ * escape hatch for a half-finished install — no need to destroy the Fly app.
+ */
+export async function resetRunnerToolchain(appPrefix: string) {
+  const appName = `${appPrefix}-midnight`;
+  const machine = await findMachineByName(appName, RUNNER.machine);
+  if (!machine) throw new Error("There is no runner machine on this stack yet.");
+  if (machine.state !== "started") await startMachine(appName, machine.id);
+  const out = await execOnMachine(
+    appName,
+    machine.id,
+    `rm -rf ${RUNNER.app}/node_modules ${RUNNER.app}/package-lock.json ${RUNNER.work}/npm-cache ${RUNNER.work}/.ready ${RUNNER.work}/bundle.tgz && echo reset-ok`,
+  );
+  if (out.exitCode !== 0 || !out.output.includes("reset-ok")) {
+    throw new Error(`Could not clear the runner's toolchain: ${out.output.slice(0, 300)}`);
+  }
+  return { ok: true as const };
+}
+
 export async function pollJob(appPrefix: string, jobId: string): Promise<RunnerJob> {
   if (!/^[a-z0-9-]+$/.test(jobId)) throw new Error("Invalid job id.");
   const appName = `${appPrefix}-midnight`;
   const machine = await findMachineByName(appName, RUNNER.machine);
   if (!machine) throw new Error("The runner machine no longer exists.");
-  return readJob(appName, machine.id, jobId);
+  const job = await readJob(appName, machine.id, jobId);
+  // On a failure the interesting lines are usually further back than the 3 kB
+  // rolling tail, so re-read a much longer tail once, for the log panel.
+  if (job.result && !job.result.ok) {
+    return readJob(appName, machine.id, jobId, 20000);
+  }
+  return job;
+
 }
