@@ -8,6 +8,48 @@ export const IMAGES = {
   indexer: "docker.io/midnightntwrk/indexer-standalone:4.3.3",
   // Pinned: `latest` has shipped incompatible proving keys mid-demo.
   proof: "docker.io/midnightntwrk/proof-server:8.1.0",
+  // Plain Node image: the runner installs the Midnight SDK onto its volume at
+  // bootstrap, so no custom image has to be built or pushed anywhere.
+  runner: "docker.io/library/node:22-bookworm-slim",
+} as const;
+
+/**
+ * The runner machine executes scripts/deploy-midnight.mjs and
+ * scripts/anchor-midnight.mjs. Proving needs a long-lived proof-server session,
+ * a wallet and a LevelDB private-state store on disk — none of which the
+ * serverless app runtime has — so the same scripts run here instead.
+ */
+export const RUNNER = {
+  machine: "midnight-runner",
+  volume: "midnight_runner",
+  /** Volume mount point; holds node_modules, artifacts, private state and logs. */
+  work: "/work",
+  /** Extracted artifact bundle; also the cwd of every job (LevelDB lives here). */
+  app: "/work/app",
+  logs: "/work/logs",
+  out: "/work/out",
+  /** Bump when the compiled contract or the scripts change so runners re-bootstrap. */
+  artifactVersion: "ips-anchor-registry-1",
+  bucket: "midnight-artifacts",
+  /** Object key inside the bucket; uploaded once from the build sandbox. */
+  object: "ips-anchor-registry-1.tgz",
+  /** LevelDB store name — shared by every anchor; the contract keeps no per-user state. */
+  store: "ips-midnight-level-db",
+  /** Pinned SDK versions, identical to the header of scripts/deploy-midnight.mjs. */
+  deps: [
+    "@midnight-ntwrk/midnight-js-contracts@4.1.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-network-id@4.1.1",
+    "@midnight-ntwrk/midnight-js-utils@4.1.1",
+    "@midnight-ntwrk/compact-js@4.1.1",
+    "@midnight-ntwrk/wallet-sdk@1.2.0",
+    "@midnight-ntwrk/testkit-js@4.1.1",
+    "@midnight-ntwrk/zswap@4.0.0",
+    "ws",
+  ],
 } as const;
 
 /** Indexer 4.x refuses to boot unless every APP__INFRA__ key is present. */
