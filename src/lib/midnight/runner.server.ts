@@ -270,6 +270,12 @@ export async function prepareRunner(input: {
     // the kernel, and install in groups to keep the memory peak down.
     `export NODE_OPTIONS=--max-old-space-size=3072`,
     `export npm_config_update_notifier=false`,
+    // A lockfile written by a previous, failed attempt can pin a dependency
+    // range that no longer resolves (e.g. the unpublished ledger-v9 alpha that
+    // compact-js 2.5.3 asked for), so a retry would fail identically. Dropping
+    // it keeps the already-installed node_modules and only re-resolves.
+    `step "clearing any stale lockfile"`,
+    `rm -f ${RUNNER.app}/package-lock.json`,
     `echo STEP:deps`,
     ...RUNNER.depGroups.flatMap((group, i) => [
       `step "installing Midnight SDK group ${i + 1} of ${RUNNER.depGroups.length}"`,

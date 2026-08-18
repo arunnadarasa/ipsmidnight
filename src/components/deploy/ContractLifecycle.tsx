@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, Eraser, Loader2, PackageCheck, Rocket } from "lucide-react";
+import { ChevronDown, Copy, Eraser, Loader2, PackageCheck, Rocket } from "lucide-react";
 import { Panel } from "@/components/SectionHeading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -122,17 +122,39 @@ export function LogTail({ log, defaultOpen = false }: { log: string; defaultOpen
   const [open, setOpen] = useState(defaultOpen);
   if (!log) return null;
 
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(log);
+      toast.success("Copied.");
+    } catch {
+      toast.error("Could not copy — select the log text instead.");
+    }
+  };
+
   return (
     <div className="space-y-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        className="h-7 px-2 text-xs text-muted-foreground"
-      >
-        <ChevronDown className={"mr-1 h-3.5 w-3.5 transition-transform " + (open ? "rotate-180" : "")} />
-        {open ? "Hide runner log" : "Show runner log"}
-      </Button>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setOpen((v) => !v)}
+          className="h-7 px-2 text-xs text-muted-foreground"
+        >
+          <ChevronDown
+            className={"mr-1 h-3.5 w-3.5 transition-transform " + (open ? "rotate-180" : "")}
+          />
+          {open ? "Hide runner log" : "Show runner log"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={copy}
+          className="h-7 px-2 text-xs text-muted-foreground"
+        >
+          <Copy className="mr-1 h-3.5 w-3.5" />
+          Copy log
+        </Button>
+      </div>
       {open ? (
         <div className="overflow-hidden rounded-xl border border-border bg-secondary/50">
           <div className="flex items-center gap-1.5 border-b border-border/70 px-3 py-1.5">
