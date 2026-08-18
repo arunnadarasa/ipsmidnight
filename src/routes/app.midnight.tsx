@@ -356,6 +356,20 @@ function MidnightConsole() {
                     {a.last_error ? <p className="text-xs text-warning">{a.last_error}</p> : null}
                   </div>
                   <div className="flex shrink-0 flex-col gap-1">
+                    <Button
+                      size="sm"
+                      onClick={() => anchorSubmission.submit.mutate(a.id)}
+                      disabled={
+                        anchorSubmission.submit.isPending || anchorSubmission.activeAnchorId !== null
+                      }
+                    >
+                      {anchorSubmission.activeAnchorId === a.id ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Rocket className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Submit
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => doVerify.mutate(a.id)} disabled={doVerify.isPending}>
                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Verify
                     </Button>
