@@ -64,27 +64,48 @@ export function StackTimeline({
       </div>
 
       {!allDone ? (
-        <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary shadow-[inset_0_0_0_1px_var(--hairline)]">
           <div
-            className={"h-full rounded-full transition-all " + (failed ? "bg-destructive" : "bg-primary")}
-            style={{ width: `${Math.round((done / Math.max(1, total)) * 100)}%` }}
+            className={
+              "relative h-full rounded-full transition-all duration-700 ease-out " +
+              (failed ? "bg-destructive" : "sheen")
+            }
+            style={{
+              width: `${Math.round((done / Math.max(1, total)) * 100)}%`,
+              background: failed ? undefined : "var(--gradient-primary)",
+            }}
           />
         </div>
       ) : null}
 
       {collapsed ? null : (
-        <ol className="space-y-1.5">
+        <ol className="relative space-y-2.5 pl-1">
+          <span
+            className="pointer-events-none absolute bottom-3 left-[10px] top-3 w-px bg-border"
+            aria-hidden
+          />
           {steps.map((step) => (
-            <li key={step.key} className="flex items-start gap-2.5">
-              <span className="mt-0.5 shrink-0">
+            <li key={step.key} className="relative flex items-start gap-3">
+              <span
+                className={
+                  "relative z-10 mt-px grid h-[19px] w-[19px] shrink-0 place-items-center rounded-full border transition-colors " +
+                  (step.state === "done"
+                    ? "border-success/40 bg-success/12 text-success"
+                    : step.state === "failed"
+                      ? "border-destructive/40 bg-destructive/12 text-destructive"
+                      : step.state === "active"
+                        ? "border-primary/40 bg-primary/12 text-primary pulse-ring"
+                        : "border-border bg-card text-muted-foreground/40")
+                }
+              >
                 {step.state === "done" ? (
-                  <Check className="h-3.5 w-3.5 text-success" />
+                  <Check className="h-3 w-3" />
                 ) : step.state === "failed" ? (
-                  <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                  <AlertTriangle className="h-3 w-3" />
                 ) : step.state === "active" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  <Circle className="h-3.5 w-3.5 text-muted-foreground/40" />
+                  <Circle className="h-2 w-2" />
                 )}
               </span>
               <span className="min-w-0 flex-1">
