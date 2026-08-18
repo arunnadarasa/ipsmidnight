@@ -21,7 +21,8 @@ import {
 import { FLY_REGIONS } from "@/lib/midnight/shared";
 import { checkFlyStack, destroyFlyStack, provisionFlyStack } from "@/lib/midnight/fly.functions";
 import contractInfo from "@/data/midnight-contract.undeployed.json";
-import { ContractLifecycle, useAnchorSubmission } from "@/components/deploy/ContractLifecycle";
+import { ContractLifecycle, LogTail, useAnchorSubmission } from "@/components/deploy/ContractLifecycle";
+import { StackTimeline } from "@/components/deploy/StackTimeline";
 import { ipsCommitment, randomSaltHex } from "@/lib/ips/digest";
 
 const PLACEHOLDER_ADDRESS = "0".repeat(64);
@@ -347,6 +348,20 @@ function MidnightConsole() {
                     <TruncatedMono value={a.commitment} label="commitment" />
                     <TruncatedMono value={a.tx_hash} label="tx" />
                     {a.last_error ? <p className="text-xs text-warning">{a.last_error}</p> : null}
+                    {anchorSubmission.activeAnchorId === a.id && anchorSubmission.steps.length ? (
+                      <div className="mt-2 space-y-2 rounded-xl border border-border/70 bg-secondary/30 p-3">
+                        <StackTimeline
+                          steps={anchorSubmission.steps}
+                          startedAt={anchorSubmission.startedAt}
+                          regionLabel={
+                            anchorSubmission.activeKind === "verify"
+                              ? "checking the ledger"
+                              : "anchoring on the runner"
+                          }
+                        />
+                        <LogTail log={anchorSubmission.log} />
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 flex-col gap-1">
                     <Button

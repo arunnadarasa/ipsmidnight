@@ -216,7 +216,10 @@ export async function prepareRunner(input: {
     `curl -fsSL "${input.bundleUrl}" -o ${RUNNER.work}/bundle.tgz`,
     `rm -rf ${RUNNER.app} && mkdir -p ${RUNNER.app}`,
     `tar xzf ${RUNNER.work}/bundle.tgz -C ${RUNNER.app}`,
+    // Plain progress markers so the UI can show a step timeline instead of a log wall.
+    `echo STEP:staged`,
     `cd ${RUNNER.app}`,
+    `echo STEP:deps`,
     `npm install --no-audit --no-fund --loglevel=error ${RUNNER.deps.join(" ")}`,
     `printf %s ${RUNNER.artifactVersion} > ${RUNNER.work}/.ready`,
     `echo BOOTSTRAP_OK`,
