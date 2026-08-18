@@ -663,3 +663,32 @@ export async function execOnMachine(
     output: `${res.stdout ?? ""}${res.stderr ?? ""}`,
   };
 }
+
+/**
+ * Recent Fly lifecycle events for a machine, newest first, as one short line.
+ * This is how a silent death becomes explainable: an OOM kill or a restart
+ * shows up here even though the job itself never got to write a result.
+ */
+export async function machineEventSummary(
+  appName: string,
+  machineId: string,
+  limit = 4,
+): Promise<string> {
+  try {
+    const m = await flyOptional<FlyMachine>(`/apps/${appName}/machines/${machineId}`);
+    const events = m?.events ?? [];
+    if (events.length === 0) return "";
+    return events
+      .slice(0, limit)
+      .map((e) => {
+        const exit = e.request?.exit_event;
+        const oom = exit?.oom_killed ? " out of memory" : "";
+        const code = typeof exit?.exit_code === "number" ? ` exit ${exit.exit_code}` : "";
+        return `${e.type ?? "event"}/${e.status ?? "?"}${code}${oom}`;
+      })
+      .join(" · ");
+  } catch {
+    return "";
+  }
+}
+
