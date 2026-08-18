@@ -30,7 +30,12 @@ const DEP_GROUPS = [
   [
     // compact-js is versioned independently of midnight-js 4.x and is not a
     // transitive dependency of midnight-js-contracts, so it needs its own pin.
-    "@midnight-ntwrk/compact-js@2.5.3",
+    // 2.5.1, NOT 2.5.3: the 2.5.3 release declares
+    // `@midnight-ntwrk/ledger-v9@^0.1.0-alpha.1`, a range that was never
+    // published (only 1.0.0-rc.x exists), so npm fails with ETARGET. 2.5.1 is
+    // also what midnight-js-protocol@4.1.1 resolves for itself, so the runner
+    // ends up with a single copy.
+    "@midnight-ntwrk/compact-js@2.5.1",
     "@midnight-ntwrk/zswap@4.0.0",
   ],
   ["@midnight-ntwrk/wallet-sdk@1.2.0", "@midnight-ntwrk/testkit-js@4.1.1"],
