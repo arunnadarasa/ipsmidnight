@@ -125,10 +125,29 @@ export async function appIpSummary(appName: string): Promise<string> {
 
 
 function machineConfig(
-  kind: "node" | "indexer" | "proof",
+  kind: MachineKind,
   appName: string,
   volumeId?: string | null,
 ) {
+  if (kind === "runner") {
+    return {
+      name: RUNNER.machine,
+      region: undefined,
+      config: {
+        image: IMAGES.runner,
+        // Idles until a job is exec'd into it. No published services: the
+        // runner only ever dials out to the indexer and the proof server.
+        init: { cmd: ["sleep", "infinity"] },
+        guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // The volume carries node_modules, the compiled contract and the
+        // LevelDB private state, so a restart never re-bootstraps or loses the
+        // private state a deployed contract was created with.
+        ...(volumeId ? { mounts: [{ volume: volumeId, path: RUNNER.work }] } : {}),
+        restart: { policy: "always" },
+      },
+    };
+  }
+
   if (kind === "node") {
     return {
       name: "midnight-node",
