@@ -3,6 +3,7 @@
  * result) onto the same ordered step model the Deploy page timeline renders.
  * Nothing here calls the backend: the poller already returns everything below.
  */
+import { RUNNER } from "@/lib/midnight/shared";
 import type { StackStep, StepState } from "@/lib/stack-steps";
 
 export type RunnerJobView = {
