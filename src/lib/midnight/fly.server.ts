@@ -1,9 +1,11 @@
-import { IMAGES, INDEXER_ENV, nodeRpcWsUrl, stackUrls, type StackUrls } from "./shared";
+import { IMAGES, INDEXER_ENV, nodeRpcWsUrl, RUNNER, stackUrls, type StackUrls } from "./shared";
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
 const NODE_VOLUME = "midnight_chain";
 const NODE_DATA_PATH = "/node/chain";
+
+export type MachineKind = "node" | "indexer" | "proof" | "runner";
 
 type FlyExitEvent = { exit_code?: number | null; oom_killed?: boolean | null };
 type FlyMachineEvent = {
