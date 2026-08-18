@@ -38,13 +38,18 @@ const INDEXER_WS = INDEXER.replace(/^http/, "ws") + "/ws";
 
 // Must match scripts/deploy-midnight.mjs exactly, or the private state the
 // deploy wrote cannot be reloaded (RpcError 117 / missing private state).
-const GENESIS_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
+// Key material is overridable through the environment. The literals are the
+// well-known Undeployed dev-network values: they are throwaway test keys and
+// MUST NOT be reused on a real network.
+const GENESIS_SEED =
+  process.env.MIDNIGHT_GENESIS_SEED ??
+  "0000000000000000000000000000000000000000000000000000000000000002";
 const PRIVATE_STATE_ID = "ips-anchor-registry";
 // The level store lives in the process cwd; pass --store when re-attaching to a
 // store written by an earlier run under a different name.
 const PRIVATE_STATE_STORE = args.store ?? "ips-midnight-level-db";
-const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-Registry-2026";
-const DEPLOYER_SECRET_HEX = "11".repeat(32);
+const PRIVATE_STORAGE_PASSWORD = process.env.MIDNIGHT_PRIVATE_STORAGE_PASSWORD ?? "Ips-Anchor-Registry-2026";
+const DEPLOYER_SECRET_HEX = process.env.MIDNIGHT_DEPLOYER_SECRET_HEX ?? "11".repeat(32);
 
 const PROJECT = resolve(args.project ?? process.cwd());
 const CONTRACT_DIR = resolve(PROJECT, "contracts/managed/ips-anchor-registry");

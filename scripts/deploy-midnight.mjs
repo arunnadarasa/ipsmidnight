@@ -40,12 +40,17 @@ if (!INDEXER || !PROOF) {
 const INDEXER_WS = INDEXER.replace(/^http/, "ws") + "/ws";
 
 // Shared with the app so private state survives redeploys — never randomise these.
-const GENESIS_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
+// Key material is overridable through the environment. The literals are the
+// well-known Undeployed dev-network values: they are throwaway test keys and
+// MUST NOT be reused on a real network.
+const GENESIS_SEED =
+  process.env.MIDNIGHT_GENESIS_SEED ??
+  "0000000000000000000000000000000000000000000000000000000000000002";
 const PRIVATE_STATE_ID = "ips-anchor-registry";
 const PRIVATE_STATE_STORE = "ips-midnight-level-db";
 // midnight-js-utils enforces >= 16 characters and mixed character classes.
-const PRIVATE_STORAGE_PASSWORD = "Ips-Anchor-Registry-2026";
-const DEPLOYER_SECRET_HEX = "11".repeat(32);
+const PRIVATE_STORAGE_PASSWORD = process.env.MIDNIGHT_PRIVATE_STORAGE_PASSWORD ?? "Ips-Anchor-Registry-2026";
+const DEPLOYER_SECRET_HEX = process.env.MIDNIGHT_DEPLOYER_SECRET_HEX ?? "11".repeat(32);
 
 // The Midnight JS SDK is ESM-only and heavy; it is installed in a scratch
 // folder rather than the app's package.json, so the script may be copied next
