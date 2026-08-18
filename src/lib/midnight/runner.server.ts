@@ -161,6 +161,22 @@ export async function readJob(appName: string, machineId: string, id: string): P
       result = { ok: false, error: `Unreadable result file: ${resultRaw.slice(0, 200)}` };
     }
   }
+
+  // A job whose wrapper is gone without a result file did not finish — it was
+  // killed (an OOM kill takes the whole machine down and `restart: always`
+  // brings it back clean). Reporting that as "still running" is what made the
+  // install look like an endless spinner, so name it instead.
+  if (!result && !alive && /JOB_START/.test(log)) {
+    const events = await machineEventSummary(appName, machineId);
+    result = {
+      ok: false,
+      error:
+        "The runner stopped before the job finished — most likely it ran out of memory and restarted." +
+        (events ? ` Recent machine events: ${events}.` : "") +
+        " Press the button again to retry; work already on the volume is reused.",
+    };
+  }
+
   return { id, kind: jobKind(id), running: alive && !result, log, result };
 }
 
