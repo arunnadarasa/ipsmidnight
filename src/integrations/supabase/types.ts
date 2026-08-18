@@ -332,6 +332,42 @@ export type Database = {
           },
         ]
       }
+      midnight_contracts: {
+        Row: {
+          address: string
+          app_prefix: string
+          contract_name: string
+          created_at: string
+          deploy_tx: string | null
+          id: string
+          network: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          address: string
+          app_prefix: string
+          contract_name?: string
+          created_at?: string
+          deploy_tx?: string | null
+          id?: string
+          network?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          address?: string
+          app_prefix?: string
+          contract_name?: string
+          created_at?: string
+          deploy_tx?: string | null
+          id?: string
+          network?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
