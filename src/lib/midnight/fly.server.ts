@@ -138,7 +138,10 @@ function machineConfig(
         // Idles until a job is exec'd into it. No published services: the
         // runner only ever dials out to the indexer and the proof server.
         init: { cmd: ["sleep", "infinity"] },
-        guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // 2 GB was not enough: npm unpacking the WASM-heavy SDK was OOM-killed
+        // a few minutes in, which restarted the machine and left the install
+        // with no error to report.
+        guest: { cpu_kind: "shared", cpus: 4, memory_mb: 4096 },
         // The volume carries node_modules, the compiled contract and the
         // LevelDB private state, so a restart never re-bootstraps or loses the
         // private state a deployed contract was created with.
