@@ -81,9 +81,14 @@ function newJobId(kind: RunnerJobKind, suffix?: string) {
  */
 function jobScript(id: string, body: string) {
   const res = `${RUNNER.out}/${id}.json`;
+  const cur = `${RUNNER.out}/${id}.cur`;
   return `#!/bin/sh
 echo $$ > ${RUNNER.out}/${id}.pid
 echo "JOB_START $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# \`step\` names the command that is about to run, both in the log and in a file,
+# so a non-zero exit can say WHAT failed instead of only the status code.
+step() { echo "RUNNING $1"; printf %s "$1" > ${cur}; }
+step "starting"
 # Heartbeat: without it a wedged job and a working job look identical in the log
 # tail, so the UI cannot tell "slow" from "dead".
 ( while true; do sleep 30; echo "HEARTBEAT $(date -u '+%H:%M:%SZ')"; done ) &
@@ -97,12 +102,15 @@ if [ ! -f ${res} ]; then
   if [ "$status" = "0" ]; then
     echo '{"ok":true}' > ${res}
   else
-    printf '{"ok":false,"error":"job exited with status %s — see the log"}\\n' "$status" > ${res}
+    label=$(cat ${cur} 2>/dev/null)
+    echo "JOB_FAILED status=$status during: $label"
+    printf '{"ok":false,"error":"Failed while %s (exit status %s) — see the runner log."}\\n' "\${label:-running the job}" "$status" > ${res}
   fi
 fi
 rm -f ${RUNNER.out}/${id}.pid
 `;
 }
+
 
 /**
  * Ships the job script as base64 rather than inlining it in the exec command:
@@ -135,7 +143,12 @@ const LOG_MARK = "===LOG===";
 const PID_MARK = "===PID===";
 
 /** Reads a job's result file, log tail, and whether its wrapper is still alive. */
-export async function readJob(appName: string, machineId: string, id: string): Promise<RunnerJob> {
+export async function readJob(
+  appName: string,
+  machineId: string,
+  id: string,
+  tailBytes = 3000,
+): Promise<RunnerJob> {
   const out = await execOnMachine(
     appName,
     machineId,
@@ -143,7 +156,8 @@ export async function readJob(appName: string, machineId: string, id: string): P
       `echo ${RESULT_MARK}`,
       `cat ${RUNNER.out}/${id}.json 2>/dev/null`,
       `echo ${LOG_MARK}`,
-      `tail -c 3000 ${RUNNER.logs}/${id}.log 2>/dev/null`,
+      `tail -c ${tailBytes} ${RUNNER.logs}/${id}.log 2>/dev/null`,
+
       `echo ${PID_MARK}`,
       // /proc beats pgrep/ps: procps is not installed in the slim Node image.
       `p=$(cat ${RUNNER.out}/${id}.pid 2>/dev/null); if [ -n "$p" ] && [ -d /proc/$p ]; then echo alive; else echo gone; fi`,
@@ -235,12 +249,18 @@ export async function prepareRunner(input: {
   const npm = `npm install --no-audit --no-fund --loglevel=error --prefer-offline --cache ${RUNNER.work}/npm-cache`;
   const body = [
     `echo "installing the Midnight toolchain (this takes a few minutes)"`,
+    `step "checking the runner's disk"`,
+    `df -h ${RUNNER.work} || true`,
+    `node -v && npm -v`,
     // The slim Node image usually ships curl; install it only if it is missing.
+    `step "installing curl on the runner"`,
     `command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }`,
+    `step "downloading the contract bundle"`,
     `curl -fsSL "${input.bundleUrl}" -o ${RUNNER.work}/bundle.tgz`,
     // Extracted over the top rather than after `rm -rf`: the bundle only
     // carries scripts and contract artifacts, so keeping node_modules in place
     // makes a retry after a restart reuse everything already installed.
+    `step "unpacking the contract bundle"`,
     `mkdir -p ${RUNNER.app} ${RUNNER.work}/npm-cache`,
     `tar xzf ${RUNNER.work}/bundle.tgz -C ${RUNNER.app}`,
     // Plain progress markers so the UI can show a step timeline instead of a log wall.
@@ -249,15 +269,20 @@ export async function prepareRunner(input: {
     // Cap the heap so npm reports a failure instead of being killed silently by
     // the kernel, and install in groups to keep the memory peak down.
     `export NODE_OPTIONS=--max-old-space-size=3072`,
+    `export npm_config_update_notifier=false`,
     `echo STEP:deps`,
     ...RUNNER.depGroups.flatMap((group, i) => [
-      `echo "installing group ${i + 1} of ${RUNNER.depGroups.length}"`,
-      `${npm} ${group.join(" ")}`,
+      `step "installing Midnight SDK group ${i + 1} of ${RUNNER.depGroups.length}"`,
+      // npm's own error output already went to the log; the debug log tail is
+      // what actually names an EBADENGINE / ENOSPC / registry failure.
+      `${npm} ${group.join(" ")} || { echo "--- npm debug log ---"; tail -n 60 ${RUNNER.work}/npm-cache/_logs/*-debug-0.log 2>/dev/null | tail -n 60; exit 1; }`,
       `echo STEP:deps:${i + 1}`,
     ]),
+    `step "recording the installed toolchain version"`,
     `printf %s ${RUNNER.artifactVersion} > ${RUNNER.work}/.ready`,
     `echo BOOTSTRAP_OK`,
   ].join("\n");
+
 
   const jobId = await launchJob(appName, machine.id, id, body);
   return { machine, jobId };
@@ -344,10 +369,38 @@ export async function startVerifyJob(input: {
 }
 
 
+/**
+ * Wipes the installed toolchain (node_modules, npm cache, ready marker) while
+ * keeping the volume, the private state and any deployed contract. This is the
+ * escape hatch for a half-finished install — no need to destroy the Fly app.
+ */
+export async function resetRunnerToolchain(appPrefix: string) {
+  const appName = `${appPrefix}-midnight`;
+  const machine = await findMachineByName(appName, RUNNER.machine);
+  if (!machine) throw new Error("There is no runner machine on this stack yet.");
+  if (machine.state !== "started") await startMachine(appName, machine.id);
+  const out = await execOnMachine(
+    appName,
+    machine.id,
+    `rm -rf ${RUNNER.app}/node_modules ${RUNNER.app}/package-lock.json ${RUNNER.work}/npm-cache ${RUNNER.work}/.ready ${RUNNER.work}/bundle.tgz && echo reset-ok`,
+  );
+  if (out.exitCode !== 0 || !out.output.includes("reset-ok")) {
+    throw new Error(`Could not clear the runner's toolchain: ${out.output.slice(0, 300)}`);
+  }
+  return { ok: true as const };
+}
+
 export async function pollJob(appPrefix: string, jobId: string): Promise<RunnerJob> {
   if (!/^[a-z0-9-]+$/.test(jobId)) throw new Error("Invalid job id.");
   const appName = `${appPrefix}-midnight`;
   const machine = await findMachineByName(appName, RUNNER.machine);
   if (!machine) throw new Error("The runner machine no longer exists.");
-  return readJob(appName, machine.id, jobId);
+  const job = await readJob(appName, machine.id, jobId);
+  // On a failure the interesting lines are usually further back than the 3 kB
+  // rolling tail, so re-read a much longer tail once, for the log panel.
+  if (job.result && !job.result.ok) {
+    return readJob(appName, machine.id, jobId, 20000);
+  }
+  return job;
+
 }

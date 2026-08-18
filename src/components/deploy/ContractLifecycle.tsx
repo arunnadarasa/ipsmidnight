@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, Loader2, PackageCheck, Rocket } from "lucide-react";
+import { ChevronDown, Eraser, Loader2, PackageCheck, Rocket } from "lucide-react";
 import { Panel } from "@/components/SectionHeading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ import {
   getRunnerStatus,
   pollRunnerJob,
   prepareRunnerMachine,
+  resetRunnerToolchainFn,
   verifyAnchorMembership,
 } from "@/lib/midnight/runner.functions";
 
@@ -117,9 +118,10 @@ export function useAnchorSubmission(appPrefix: string | null | undefined) {
   };
 }
 
-export function LogTail({ log }: { log: string }) {
-  const [open, setOpen] = useState(false);
+export function LogTail({ log, defaultOpen = false }: { log: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   if (!log) return null;
+
   return (
     <div className="space-y-2">
       <Button
@@ -168,8 +170,16 @@ export function ContractLifecycle({
   const prepareFn = useServerFn(prepareRunnerMachine);
   const deployFn = useServerFn(deployAnchorContract);
   const pollFn = useServerFn(pollRunnerJob);
+  const resetFn = useServerFn(resetRunnerToolchainFn);
   const [jobId, setJobId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
+  // The finished job is kept so its log and error survive the poll stopping —
+  // otherwise "see the log" points at a log that has already been dropped.
+  const [settled, setSettled] = useState<{
+    kind: string;
+    log: string;
+    result: { ok: boolean; error?: string } | null;
+  } | null>(null);
   const monotonic = useMonotonicSteps();
 
   const status = useQuery({
@@ -187,6 +197,7 @@ export function ContractLifecycle({
       const result = await pollFn({ data: { appPrefix: appPrefix!, jobId: jobId! } });
       if (result.result) {
         setJobId(null);
+        setSettled({ kind: result.kind, log: result.log ?? "", result: result.result });
         void qc.invalidateQueries({ queryKey: ["midnight_runner", appPrefix] });
         if (result.result.ok) {
           toast.success(result.kind === "deploy" ? "Contract deployed." : "Runner ready.");
@@ -198,11 +209,16 @@ export function ContractLifecycle({
     },
   });
 
+  const startJob = (id: string) => {
+    setSettled(null);
+    setJobId(id);
+    setStartedAt(new Date().toISOString());
+  };
+
   const prepare = useMutation({
     mutationFn: () => prepareFn({ data: { appPrefix: appPrefix!, region } }),
     onSuccess: (r) => {
-      setJobId(r.jobId);
-      setStartedAt(new Date().toISOString());
+      startJob(r.jobId);
       toast.info("Installing the Midnight toolchain on the runner — a few minutes.");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -211,18 +227,29 @@ export function ContractLifecycle({
   const deploy = useMutation({
     mutationFn: () => deployFn({ data: { appPrefix: appPrefix! } }),
     onSuccess: (r) => {
-      setJobId(r.jobId);
-      setStartedAt(new Date().toISOString());
+      startJob(r.jobId);
       toast.info("Deploying — proving the contract's initial state.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const reset = useMutation({
+    mutationFn: () => resetFn({ data: { appPrefix: appPrefix! } }),
+    onSuccess: () => {
+      setSettled(null);
+      void qc.invalidateQueries({ queryKey: ["midnight_runner", appPrefix] });
+      toast.success("Cleared the runner's toolchain — press Prepare runner to reinstall.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const s = status.data;
   const j = job.data;
-  const running = Boolean(j?.running) || Boolean(jobId);
+  const running = Boolean(jobId);
   const contract = s?.contract ?? null;
-  const busy = prepare.isPending || deploy.isPending || running;
+  const busy = prepare.isPending || deploy.isPending || reset.isPending || running;
+  const failure = settled?.result && !settled.result.ok ? settled.result.error : null;
+  const logText = j?.log ?? settled?.log ?? "";
 
   const jobSteps = j
     ? monotonic(
@@ -243,6 +270,7 @@ export function ContractLifecycle({
       current: Boolean(s?.current),
       contract,
     });
+
 
   return (
     <Panel title="Anchor contract" subtitle="Compact · IpsAnchorRegistry">
@@ -265,6 +293,13 @@ export function ContractLifecycle({
                 : null
             }
           />
+
+          {failure ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium text-destructive">The last runner job failed</p>
+              <p className="mt-1 text-muted-foreground">{failure}</p>
+            </div>
+          ) : null}
 
           {contract ? (
             <div className="space-y-2 text-sm">
@@ -305,6 +340,22 @@ export function ContractLifecycle({
               )}
               {contract ? "Redeploy contract" : "Deploy contract"}
             </Button>
+            {s?.machine ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => reset.mutate()}
+                disabled={busy}
+                className="text-muted-foreground"
+              >
+                {reset.isPending ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Eraser className="mr-1.5 h-4 w-4" />
+                )}
+                Clear toolchain
+              </Button>
+            ) : null}
           </div>
 
           {!stackReady ? (
@@ -313,7 +364,8 @@ export function ContractLifecycle({
             </p>
           ) : null}
 
-          <LogTail log={j?.log ?? ""} />
+          <LogTail log={logText} defaultOpen={Boolean(failure)} />
+
         </div>
       )}
     </Panel>
