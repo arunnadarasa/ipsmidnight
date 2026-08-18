@@ -348,7 +348,7 @@ export async function provisionStack(input: {
   await allocateIps(appName);
 
   const machines: { name: string; id: string; state: string }[] = [];
-  for (const kind of ["node", "indexer", "proof"] as const) {
+  for (const kind of ["node", "indexer", "proof", "runner"] as const) {
     const m = await ensureMachine(appName, kind, input.region);
     machines.push({ name: m.name ?? kind, id: m.id, state: m.state ?? "created" });
   }
