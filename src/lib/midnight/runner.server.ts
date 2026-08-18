@@ -81,9 +81,14 @@ function newJobId(kind: RunnerJobKind, suffix?: string) {
  */
 function jobScript(id: string, body: string) {
   const res = `${RUNNER.out}/${id}.json`;
+  const cur = `${RUNNER.out}/${id}.cur`;
   return `#!/bin/sh
 echo $$ > ${RUNNER.out}/${id}.pid
 echo "JOB_START $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# \`step\` names the command that is about to run, both in the log and in a file,
+# so a non-zero exit can say WHAT failed instead of only the status code.
+step() { echo "RUNNING $1"; printf %s "$1" > ${cur}; }
+step "starting"
 # Heartbeat: without it a wedged job and a working job look identical in the log
 # tail, so the UI cannot tell "slow" from "dead".
 ( while true; do sleep 30; echo "HEARTBEAT $(date -u '+%H:%M:%SZ')"; done ) &
@@ -97,12 +102,15 @@ if [ ! -f ${res} ]; then
   if [ "$status" = "0" ]; then
     echo '{"ok":true}' > ${res}
   else
-    printf '{"ok":false,"error":"job exited with status %s — see the log"}\\n' "$status" > ${res}
+    label=$(cat ${cur} 2>/dev/null)
+    echo "JOB_FAILED status=$status during: $label"
+    printf '{"ok":false,"error":"Failed while %s (exit status %s) — see the runner log."}\\n' "\${label:-running the job}" "$status" > ${res}
   fi
 fi
 rm -f ${RUNNER.out}/${id}.pid
 `;
 }
+
 
 /**
  * Ships the job script as base64 rather than inlining it in the exec command:
