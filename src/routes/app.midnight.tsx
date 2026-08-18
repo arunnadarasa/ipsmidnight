@@ -21,7 +21,8 @@ import {
 import { FLY_REGIONS } from "@/lib/midnight/shared";
 import { checkFlyStack, destroyFlyStack, provisionFlyStack } from "@/lib/midnight/fly.functions";
 import contractInfo from "@/data/midnight-contract.undeployed.json";
-import { ContractLifecycle, useAnchorSubmission } from "@/components/deploy/ContractLifecycle";
+import { ContractLifecycle, LogTail, useAnchorSubmission } from "@/components/deploy/ContractLifecycle";
+import { StackTimeline } from "@/components/deploy/StackTimeline";
 import { ipsCommitment, randomSaltHex } from "@/lib/ips/digest";
 
 const PLACEHOLDER_ADDRESS = "0".repeat(64);
