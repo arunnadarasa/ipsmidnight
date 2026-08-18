@@ -93,6 +93,7 @@ export const anchorQueuedSummary = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .maybeSingle();
     if (error || !anchor) throw new Error("That anchor no longer exists.");
+    if (!anchor.commitment) throw new Error("That anchor has no commitment to submit.");
 
     const { data: contract } = await supabase
       .from("midnight_contracts")
