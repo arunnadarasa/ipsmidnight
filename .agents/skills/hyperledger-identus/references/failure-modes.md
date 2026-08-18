@@ -30,6 +30,14 @@
 | x402 / delegation gate rejects with "credential mismatch" although both credentials are valid | The human principal (credential subject) was compared against the agent DID (mandate subject) | Compare principal↔credential subject and agent↔mandate subject separately; the mandate links the two, they are never equal. |
 | ZK panel appears frozen with no error | WASM/module download stalled with no per-phase timeout | Track phase + bytes, apply a per-phase timeout, and surface a retry button (`zk-proof-client-entry.tsx` distinguishes `load-timeout` / `prove-timeout`). |
 
+| Agent exits `Main child exited normally with code: 1`, prism-node healthy | Identus 1.40 migrations need roles `pollux-application-user` / `connect-application-user` / `agent-application-user`; the real error is buried in a ZIO trace | Recreate the Postgres machine with an init script that creates those roles + grants ("Fix agent DB"). Env edits cannot retro-create roles in an existing volume. |
+| Migration fails with a syntax error near `FORMAT` | Postgres 14+ reserves `FORMAT`; the bundled Flyway migrations assume older syntax | Pin the agent's Postgres to `docker.io/postgres:13-alpine` and recreate the machine on a fresh volume. |
+| `UnknownHostException` on the DB or prism host | Machine created without `config.metadata.fly_process_group`, so it is absent from Fly private DNS | Recreate the machine with `metadata: { fly_process_group: <name> }`. |
+| Agent boots once, then fails wallet/resource acquisition after every restart | `DEFAULT_WALLET_SEED` regenerated per boot | Derive the seed deterministically from the app identity and store it. |
+| Log endpoint returns nothing useful for a crash-looping machine | The log stream needs a live machine | Use the machine `exec` API to read the JVM log, widen the window, and extract the first `ERROR`/`Caused by` line. |
+| Whole page fails to render with `FLY_API_TOKEN is not configured` | A status/loader function throws instead of reporting an unconfigured state | Return an `unconfigured` status object and render an "add the secret" hint. |
+| Provisioning a second stack overwrites the first | `unique (user_id)` index not scoped by stack kind | Scope the index `(user_id, kind)`. |
+
 ## Readiness vs health
 
 `checkHealth` hits only `/_system/health`. `probeAgent` hits four endpoints and is the real readiness signal — an agent can pass system health but fail DID registrar while migrations are still running. Use `awaitAgentReady` (which calls `probeAgent`) before declaring an agent usable.

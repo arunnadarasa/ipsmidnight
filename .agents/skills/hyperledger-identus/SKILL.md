@@ -61,7 +61,7 @@ When adding a feature: put raw logic in `*.server.ts`, expose it via `createServ
 - Fly Machines API: `https://api.machines.dev/v1`
 - Fly GraphQL API: `https://api.fly.io/graphql`
 - Sprites.dev API: `https://api.sprites.dev/v1`
-- Docker Hub images (pinned — GHCR is not anonymously pullable): `docker.io/identus/identus-cloud-agent:1.40.0`, `docker.io/identus/prism-node:2.5.0`, `postgres:16-alpine`.
+- Docker Hub images (pinned — GHCR is not anonymously pullable): `docker.io/identus/identus-cloud-agent:1.40.0`, `docker.io/identus/prism-node:2.5.0`, `docker.io/postgres:13-alpine` (see the Postgres pin invariant — 16 breaks the Flyway migrations).
 
 ## Database tables
 
@@ -74,6 +74,14 @@ All RLS-scoped by `user_id` (service_role has full access): `profiles`, `user_ro
 - Health-check `grace_period` is `300s` — first boot migrates four databases; a shorter period makes Fly restart mid-migration.
 - GHCR images require auth; use the public Docker Hub tags with explicit versions, never `:latest`.
 - Postgres init creates four databases (`pollux`, `connect`, `agent`, `node`) to avoid schema-migration collisions.
+- **Identus 1.40 connects as dedicated Postgres roles, not as the superuser.** The Flyway migrations authenticate as `pollux-application-user`, `connect-application-user` and `agent-application-user`. If they don't exist the agent exits with `Main child exited normally with code: 1` and the real cause (`ERROR: role "pollux-application-user" does not exist`) sits many frames deep inside a ZIO/cats resource-acquisition trace. The Postgres init script must `CREATE ROLE` each one (LOGIN + password) and grant it usage on the schema plus all tables/sequences in its database, per database.
+- **Pin Postgres to `13-alpine` for the agent.** On `16-alpine` the bundled Flyway migrations fail with a syntax error near `FORMAT` (reserved from Postgres 14 on). Symptom looks like a corrupt migration, not a version problem. Do not bump this pin without re-running a first-boot migration on a fresh volume.
+- **Fly private DNS keys off `fly_process_group` metadata, not the machine name.** Machines created without `config.metadata.fly_process_group = <name>` are simply not in private DNS, and the agent dies with `UnknownHostException` on the Postgres/prism host. Set it on every machine in the stack.
+- **Derive `DEFAULT_WALLET_SEED` deterministically** (e.g. hash of the app name + a stored salt), never randomly per boot. A rotating seed makes the agent's wallet resource acquisition fail after any restart, with the same opaque ZIO trace.
+- **Read boot logs through the machine `exec` API, not the log stream.** A crash-looping machine never stays up long enough for the log endpoint to return anything useful; a short `exec` that cats/tails the JVM log inside the machine is what actually surfaces the exception. Keep the log window generous (the fatal line often precedes many pages of Hikari shutdown noise) and extract the first `ERROR`/`Caused by` line for the UI.
+- **Recreating the Postgres machine is the only fix for missing roles.** Env edits and restarts cannot retro-create a role inside an existing volume — expose an explicit "Fix agent DB" repair action instead of telling users to redeploy the whole stack.
+- **Unique indexes on stack/connection tables must be scoped by kind.** A single `unique (user_id)` index stops an Identus record and a Midnight record from coexisting for the same user; scope it `(user_id, kind)` or provisioning the second stack silently overwrites the first.
+- **Every Fly status function must degrade gracefully when `FLY_API_TOKEN` is absent.** Return an `unconfigured` state the UI can render; throwing inside a loader/status query blanks the whole page and hides the actual "add the secret" instruction.
 - Agent memory default is 4 GB; lower values get OOM-killed during first-boot migration.
 - A Fly app is unreachable until a public IP is allocated (shared v4 + v6); allocate during provisioning and expose a repair action for older apps.
 - Cap any single Fly readiness poll at 60s. Longer `timeout` values are rejected by the Machines API with a 400.
@@ -174,3 +182,16 @@ For deeper detail see the reference cards: [fly-machine-config](references/fly-m
 4. Any REST snippet must keep `REST_PRELUDE` at the top so simulated mode explains itself instead of throwing `Invalid URL`.
    **Success:** a user with an old saved copy sees the stale badge and gets working code after resetting.
 
+### 11. Repair the agent database (missing Postgres roles)
+
+1. Symptom: prism-node is healthy, the cloud agent restarts forever, and the boot log ends in
+   `Main child exited normally with code: 1`. Deeper in the trace:
+   `ERROR: role "pollux-application-user" does not exist`.
+2. Read the boot log with the machine `exec` path (not the log stream) to confirm the role error
+   rather than guessing at OOM or DNS.
+3. Run the "Fix agent DB" repair: destroy and recreate the Postgres machine with the role-aware
+   init script (four databases **plus** the three `*-application-user` roles and their grants),
+   then restart the cloud-agent machine.
+4. If the agent instead fails with a syntax error near `FORMAT`, the Postgres image drifted off
+   `13-alpine` — repin and recreate the machine.
+   **Success:** `probeAgent` passes all four checks and the agent no longer restarts.

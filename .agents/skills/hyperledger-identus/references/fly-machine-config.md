@@ -56,3 +56,32 @@ Set on **both** prism-node and cloud-agent. `MaxRAMPercentage=70` keeps the heap
 ## Readiness
 
 `awaitAgentReady` (in `src/lib/identus.functions.ts`) polls `probeAgent` with exponential backoff. The `AgentConnection` row tracks `readiness_status` (`unknown` | `waiting` | `ready` | `timeout`), `readiness_attempts`, `readiness_started_at`, `ready_at`. First boot is slow (four DB migrations); expect 1–3 minutes.
+
+## Private DNS (`fly_process_group`)
+
+Fly's internal DNS resolves `<name>.process.<app>.internal` from the machine's
+`config.metadata.fly_process_group`, **not** from the machine name. Create every machine with:
+
+```ts
+config: { ...spec.config, metadata: { fly_process_group: spec.name } }
+```
+
+Without it the agent cannot resolve Postgres or prism-node and fails with `UnknownHostException`.
+
+## Postgres machine: image pin and roles
+
+- Image: `docker.io/postgres:13-alpine`. Postgres 14+ reserves `FORMAT`, which the agent's
+  Flyway migrations use unquoted — 16-alpine fails with a bare syntax error.
+- The init script must create the four databases **and** the roles the agent authenticates as:
+  `pollux-application-user`, `connect-application-user`, `agent-application-user` (LOGIN +
+  password), each granted `USAGE` on `public` and privileges on all tables/sequences in its
+  database, plus matching `ALTER DEFAULT PRIVILEGES`.
+- The init script only runs on an empty volume. Fixing roles therefore means destroying and
+  recreating the Postgres machine (the "Fix agent DB" repair), not editing env and restarting.
+
+## Reading logs from a crash-looping machine
+
+The Machines API log stream needs a live machine. For a machine in a restart loop, run a short
+`exec` that reads the JVM log inside the machine, keep a generous tail window (the fatal line is
+usually followed by pages of HikariPool shutdown noise), and surface the first `ERROR` /
+`Caused by` line in the UI.
