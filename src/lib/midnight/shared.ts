@@ -58,7 +58,9 @@ export const RUNNER = {
   logs: "/work/logs",
   out: "/work/out",
   /** Bump when the compiled contract or the scripts change so runners re-bootstrap. */
-  artifactVersion: "ips-anchor-registry-2",
+  // Bumped when the SDK pins change so an already-"prepared" runner re-installs
+  // instead of being skipped with a half-broken node_modules on its volume.
+  artifactVersion: "ips-anchor-registry-3",
   bucket: "midnight-artifacts",
   /** Object key inside the bucket; uploaded once from the build sandbox. */
   object: "ips-anchor-registry-2.tgz",
