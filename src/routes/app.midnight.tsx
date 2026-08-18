@@ -316,10 +316,12 @@ function MidnightConsole() {
                   key={b.id}
                   size="sm"
                   variant="outline"
+                  className="max-w-full"
                   onClick={() => prepareAnchor.mutate(b)}
                   disabled={prepareAnchor.isPending}
                 >
-                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Queue “{b.title}”
+                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">Queue “{b.title}”</span>
                 </Button>
               ))
             ) : (
@@ -329,27 +331,60 @@ function MidnightConsole() {
 
           {anchors?.length ? (
             <ul className="space-y-2">
-              {anchors.map((a) => (
-                <li
-                  key={a.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2"
-                >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusDot status={a.status === "confirmed" ? "ok" : a.status === "error" ? "error" : "pending"} />
-                      <Badge variant="secondary" className="text-[11px]">
-                        {a.status}
-                      </Badge>
-                      <span className="font-mono text-xs text-muted-foreground">{a.network}</span>
-                      {a.block_height ? (
-                        <span className="font-mono text-xs text-muted-foreground">block #{a.block_height}</span>
-                      ) : null}
+              {anchors.map((a) => {
+                const tone = anchorTone(a.status);
+                const onLedger = a.status === "anchored" || a.status === "confirmed";
+                const busy = anchorSubmission.activeAnchorId !== null;
+                return (
+                  <li
+                    key={a.id}
+                    className="rounded-xl border border-border bg-card/60 px-3 py-3 transition-colors hover:border-primary/40"
+                  >
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <StatusDot status={tone.dot} />
+                          <Badge variant={tone.badge} className="text-[11px]">
+                            {tone.label}
+                          </Badge>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {a.network}
+                            {a.block_height ? ` · block #${a.block_height}` : ""}
+                          </span>
+                        </div>
+                        <TruncatedMono value={a.commitment} label="commitment" />
+                        <TruncatedMono value={a.tx_hash} label="tx" />
+                        {a.last_error ? <p className="text-xs text-warning">{a.last_error}</p> : null}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0 sm:flex-col sm:gap-1">
+                        <Button
+                          size="sm"
+                          variant={onLedger ? "outline" : "default"}
+                          className="w-full sm:w-auto"
+                          onClick={() => anchorSubmission.submit.mutate(a.id)}
+                          disabled={anchorSubmission.submit.isPending || busy}
+                        >
+                          {anchorSubmission.activeAnchorId === a.id ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+                          ) : (
+                            <Rocket className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                          )}
+                          {onLedger ? "Re-anchor" : "Submit"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={onLedger ? "default" : "outline"}
+                          className="w-full sm:w-auto"
+                          onClick={() => anchorSubmission.verify.mutate(a.id)}
+                          disabled={anchorSubmission.verify.isPending || busy}
+                        >
+                          <ExternalLink className="mr-1.5 h-3.5 w-3.5 shrink-0" /> Check ledger
+                        </Button>
+                      </div>
                     </div>
-                    <TruncatedMono value={a.commitment} label="commitment" />
-                    <TruncatedMono value={a.tx_hash} label="tx" />
-                    {a.last_error ? <p className="text-xs text-warning">{a.last_error}</p> : null}
+
                     {anchorSubmission.activeAnchorId === a.id && anchorSubmission.steps.length ? (
-                      <div className="mt-2 space-y-2 rounded-xl border border-border/70 bg-secondary/30 p-3">
+                      <div className="mt-3 space-y-2 rounded-xl border border-border/70 bg-secondary/30 p-3">
                         <StackTimeline
                           steps={anchorSubmission.steps}
                           startedAt={anchorSubmission.startedAt}
@@ -362,39 +397,14 @@ function MidnightConsole() {
                         <LogTail log={anchorSubmission.log} />
                       </div>
                     ) : null}
-                  </div>
-                  <div className="flex shrink-0 flex-col gap-1">
-                    <Button
-                      size="sm"
-                      onClick={() => anchorSubmission.submit.mutate(a.id)}
-                      disabled={
-                        anchorSubmission.submit.isPending || anchorSubmission.activeAnchorId !== null
-                      }
-                    >
-                      {anchorSubmission.activeAnchorId === a.id ? (
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Rocket className="mr-1.5 h-3.5 w-3.5" />
-                      )}
-                      Submit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => anchorSubmission.verify.mutate(a.id)}
-                      disabled={
-                        anchorSubmission.verify.isPending || anchorSubmission.activeAnchorId !== null
-                      }
-                    >
-                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Check ledger
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="text-sm text-muted-foreground">No anchors yet.</p>
           )}
+
         </div>
       </Panel>
     </div>
