@@ -6,7 +6,7 @@ import {
   IDENTUS_DB,
   IDENTUS_IMAGES,
   JAVA_TOOL_OPTIONS,
-  POSTGRES_INIT_SQL,
+  postgresInitSql,
   identusStackUrls,
   type IdentusStackUrls,
 } from "./fly-shared";
@@ -125,6 +125,9 @@ export function mintAdminKey() {
 type MachineKind = "postgres" | "prism-node" | "cloud-agent";
 
 function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
+  // Unique per Fly app: tenants share one Fly organisation/private network, so a
+  // shared password would let any reachable machine open another tenant's DB.
+  const db = identusDbCreds(appName);
 
 
   const pgHost = `identus-postgres.process.${appName}.internal`;
@@ -136,11 +139,11 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
       config: {
         image: IDENTUS_IMAGES.postgres,
         env: {
-          POSTGRES_USER: IDENTUS_DB.user,
-          POSTGRES_PASSWORD: IDENTUS_DB.password,
+          POSTGRES_USER: db.user,
+          POSTGRES_PASSWORD: db.password,
           POSTGRES_DB: "postgres",
         },
-        files: [{ guest_path: "/docker-entrypoint-initdb.d/00-init.sql", raw_value: b64(POSTGRES_INIT_SQL) }],
+        files: [{ guest_path: "/docker-entrypoint-initdb.d/00-init.sql", raw_value: b64(postgresInitSql(db.appRolePassword)) }],
         guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
         // Postgres is reached over 6PN only — declaring a service here is what
         // makes Fly treat the machine as a public web service and can stop the
@@ -159,8 +162,8 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
         env: {
           NODE_PSQL_HOST: `${pgHost}:5432`,
           NODE_PSQL_DATABASE: "node",
-          NODE_PSQL_USERNAME: IDENTUS_DB.user,
-          NODE_PSQL_PASSWORD: IDENTUS_DB.password,
+          NODE_PSQL_USERNAME: `${db.user}`,
+          NODE_PSQL_PASSWORD: db.password,
           NODE_LEDGER: "in-memory",
           NODE_REFRESH_AND_SUBMIT_PERIOD: "1s",
           NODE_MOVE_SCHEDULED_TO_PENDING_PERIOD: "1s",
@@ -182,18 +185,18 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
         POLLUX_DB_HOST: pgHost,
         POLLUX_DB_PORT: "5432",
         POLLUX_DB_NAME: "pollux",
-        POLLUX_DB_USER: IDENTUS_DB.user,
-        POLLUX_DB_PASSWORD: IDENTUS_DB.password,
+        POLLUX_DB_USER: db.user,
+        POLLUX_DB_PASSWORD: db.password,
         CONNECT_DB_HOST: pgHost,
         CONNECT_DB_PORT: "5432",
         CONNECT_DB_NAME: "connect",
-        CONNECT_DB_USER: IDENTUS_DB.user,
-        CONNECT_DB_PASSWORD: IDENTUS_DB.password,
+        CONNECT_DB_USER: db.user,
+        CONNECT_DB_PASSWORD: db.password,
         AGENT_DB_HOST: pgHost,
         AGENT_DB_PORT: "5432",
         AGENT_DB_NAME: "agent",
-        AGENT_DB_USER: IDENTUS_DB.user,
-        AGENT_DB_PASSWORD: IDENTUS_DB.password,
+        AGENT_DB_USER: db.user,
+        AGENT_DB_PASSWORD: db.password,
         PRISM_NODE_HOST: `identus-prism-node.process.${appName}.internal`,
         PRISM_NODE_PORT: "50053",
         SECRET_STORAGE_BACKEND: "postgres",
