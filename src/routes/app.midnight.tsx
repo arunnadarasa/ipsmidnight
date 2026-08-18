@@ -157,13 +157,13 @@ function MidnightConsole() {
       return commitment;
     },
     onSuccess: () => {
-      toast.success("Anchor queued — submit it with the deploy script, then verify.");
+      toast.success("Anchor queued — press Submit to prove and write it on-chain.");
       void qc.invalidateQueries({ queryKey: ["anchors"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const deployed = contractInfo.address !== PLACEHOLDER_ADDRESS;
+  const anchorSubmission = useAnchorSubmission(deployment?.app_prefix);
 
   return (
     <div className="space-y-8">
