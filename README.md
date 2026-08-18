@@ -141,7 +141,7 @@ A check on a bundle a verifier has been handed. Each pass reports independently,
 
 True on-chain verification is a separate, per-row action on the Midnight page (**Check ledger**): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
 
-True on-chain verification is a separate action on the Midnight page ("Check ledger"): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
+
 
 ### Activity log (`/app/activity`)
 An append-only audit trail of provisioning, issuance and anchoring events per user.
@@ -162,6 +162,7 @@ Tables (Lovable Cloud / Postgres):
 | `sample_bundles` | Shipped demo bundles, readable by all signed-in users |
 | `credential_records` | Issued credentials linked to a bundle |
 | `midnight_anchors` | Commitments, the **salt** the commitment was derived from, transaction references, contract address |
+| `midnight_contracts` | Deployed contract address + deploy tx per user/app-prefix, so anchors survive a destroyed runner volume |
 | `activity_log` | Audit events |
 
 Security posture:
