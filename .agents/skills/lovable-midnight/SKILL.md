@@ -791,3 +791,102 @@ bun run dev
 
 Log long proves with `tee` + `rg` (see the prove-log rule above) while working through this —
 piping through `awk`/`head` SIGPIPEs the prove and makes recovery look like flakiness.
+
+## 2026-08 update — ipsmidnight lessons (Undeployed on Fly + UI-driven deploy)
+
+From `github.com/arunnadarasa/ipsmidnight` — a clinical IPS console that provisions the whole
+Undeployed stack on Fly and then deploys/anchors/verifies a Compact contract **from the UI**
+instead of from a chat session. Everything below cost hours.
+
+### Node RPC: one working shape only
+
+- Publish the node's 9944 as a **pure `tls`** service through the Fly edge and point every
+  consumer at `wss://<app>.fly.dev:9944`.
+- Why nothing else works: `<app>.internal` is IPv6-only 6PN while the node binds IPv4 (and
+  binding both is fragile); `<app>.flycast` needs a private IP allocation and still answered
+  `000` even from inside the app; Fly's `http` handler terminates the WebSocket partway through
+  a long proof submission, so writes fail after minutes of proving.
+- Report reachability as measured facts, not assumptions: probe `127.0.0.1:9944/health` from the
+  node machine and the edge URL from the indexer machine, and read public-IP / flycast presence
+  back from Fly (`flycast: present|absent · public IP: …`).
+
+### The indexer fails silently, so probe it explicitly
+
+If the indexer cannot reach the node RPC it does not error — it serves an **empty chain** and the
+UI reports block 0 forever, which looks like "nothing anchored yet". Always assert
+`node reachable from indexer` as its own timeline step before believing any indexer answer.
+
+### Runner-machine pattern (deploy from the UI, not from chat)
+
+Contract compile → deploy → anchor → verify needs a persistent disk, the Compact toolchain, and
+connections that stay open for minutes. The app runtime (edge/Worker) has none of that.
+
+- Add a 4th **runner** machine to the same Fly app as node / indexer / proof server, with a volume
+  holding the contract bundle, keys, and LevelDB private state.
+- Drive it with the Machines `exec` API from a server function: `prepare` (pull the toolchain
+  bundle), then fire-and-poll jobs. Never block a request on proving.
+- Scripts must print **machine-readable result lines** (`RESULT {json}`) plus human log output, so
+  one poll returns both a parsed result and a log tail the UI can render as a terminal.
+- Ship the toolchain as a versioned tarball in storage and require an explicit "Prepare runner"
+  step after you bump it — otherwise users silently run last week's contract code.
+- Existence-probe before trusting stored state: Fly apps/machines get destroyed outside the app, so
+  a "ready" row must be re-verified against Fly and downgraded rather than shown as green.
+
+### SDK v4 provider gotchas
+
+- `privateStoragePasswordProvider` has a **minimum length**; a short password throws during wallet
+  construction with an unrelated-looking error.
+- `httpClientProofProvider(url, zkConfigProvider)` must receive the *same*
+  `NodeZkConfigProvider(CONTRACT_DIR)` instance you pass as `zkConfigProvider`. Omit it and the
+  proof server answers `400 Bad Request` on `/check`.
+- Genesis wallet must be fully synced before deploy; resync after any chain-data volume rebuild.
+
+### Verification honesty (from a public code review of this repo)
+
+- **Ledger membership is the only proof.** `commitments.member(commitment)` read from the deployed
+  contract's public state is verification; a stored tx hash, a "confirmed" status column, or a
+  green badge derived from your own database is not.
+- **Persist the salt** alongside the anchor. A salted commitment whose salt was never stored can
+  never be re-derived, which makes the anchor permanently unverifiable — and no reviewer will
+  accept "trust the row".
+- **Minimise credential claims.** Do not put patient name, title, or raw DOB in a credential that
+  exists to prove a property; derive `over18` and ship that instead.
+- **Label what you did not check.** Simulated credentials, unresolvable `did:prism` values, and
+  unverified JWS signatures must render as *unverifiable / not checked*, never as pass. Reject
+  simulated artefacts outright in signature-check paths.
+
+### Key and state hygiene
+
+- `.gitignore` must cover `.env`, the LevelDB private-state directory (`midnight-level-db/`), and
+  `*.tgz` toolchain bundles. Untrack them if they already landed in a commit.
+- Dev seeds, storage passwords, and contract addresses come from `process.env` with a documented
+  fallback — never hardcoded literals in `scripts/*.mjs`.
+
+### Graceful degradation
+
+Any Fly/stack status server function must return an `unconfigured` result when `FLY_API_TOKEN` is
+missing instead of throwing. A throw inside a loader or status query blanks the page and hides the
+one instruction the user needs ("add the secret").
+
+### New failure modes
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Indexer stuck at block 0, no errors | Indexer cannot reach node RPC | Publish 9944 as `tls` on the Fly edge; point the indexer at `wss://<app>.fly.dev:9944`; add an explicit reachability step. |
+| Proof submission dies after minutes of proving | Fly `http` handler closed the WebSocket | Use a pure `tls` handler on 9944 — no `http`/`http_options`. |
+| `000` from `<app>.flycast:9944` even inside the app | No private IP allocated / IPv6-only path to an IPv4 listener | Allocate the private IP for diagnostics, but route traffic over the public edge. |
+| Proof server returns `400 Bad Request` on `/check` | `httpClientProofProvider` called without the `zkConfigProvider` | Pass the same `NodeZkConfigProvider` instance to both. |
+| Wallet construction throws on start | `privateStoragePasswordProvider` value too short | Use a long password from env. |
+| Anchor shows "confirmed" but cannot be proven to anyone | Salt not persisted; verification read from your own DB | Store the salt; verify with `commitments.member(commitment)` on-chain. |
+| Contract "compiled but never deployed" | Runner never prepared, or running an old toolchain bundle | Bump the bundle version and require an explicit "Prepare runner" run. |
+| Stack shows ready but the Fly app is gone | Stored state trusted without probing | Existence-probe app + machines and downgrade the row. |
+| Page blanks with `FLY_API_TOKEN is not configured` | Status function throws | Return an `unconfigured` state. |
+
+### Anti-patterns (add to the main list)
+
+- Deriving a "verified" badge from your own database instead of the contract's public state.
+- Putting raw PII in a credential whose only job is to prove a predicate.
+- Committing `.env`, LevelDB private state, or toolchain tarballs.
+- Running proving work inside the app runtime instead of on a persistent runner machine.
+- Assuming `.internal` / `.flycast` reachability instead of probing it from the consuming machine.
+
