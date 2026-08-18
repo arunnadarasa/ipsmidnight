@@ -110,12 +110,25 @@ Two modes, selectable in the UI:
 Issued credentials are recorded against the summary they attest.
 
 ### Midnight console (`/app/midnight`)
-Stack status (node / indexer / proof server), the resolved indexer GraphQL and proof-server endpoints, and the anchoring action: submit the IPS digest as a commitment to `IpsAnchorRegistry` and store the resulting transaction reference.
+Stack status (node / indexer / proof server / runner), the resolved indexer GraphQL and proof-server endpoints, and the anchoring action. Each saved summary can be queued as an anchor; each anchor row carries its commitment and (once submitted) its transaction reference, and exposes two actions:
+
+- **Submit / Re-anchor** — queues the commitment on the runner, which calls `anchorSummary` on the deployed contract and writes back the tx hash and block height. A submitted anchor reads as **anchored · not re-checked** until you explicitly verify it — the presence of a transaction hash is *not* treated as verification.
+- **Check ledger** — runs `scripts/verify-midnight.mjs` on the runner: a read-only query of the indexer for the contract's public state, then a call to the generated `ledger()` view's `commitments.member(commitment)`. The toast reports whether the commitment is in the on-chain Set.
+
+Both actions render a per-row step timeline (wallet sync → proving → confirmed / reading ledger → answer) and a collapsible runner log with a copy button.
 
 ### Deploy console (`/app/deploy`)
 The unified provisioning surface. One action provisions **both** stacks; `checkFullStack` polls them; `repairFullStack` re-applies machine metadata and config; `repairIdentusOnly` ("Fix agent DB") recreates just the Identus Postgres so its init SQL reruns without disturbing a healthy Midnight stack; `destroyFullStack` tears everything down.
 
 Progress is rendered as a **step timeline** rather than a spinner: each step reports pending / booting / healthy / failed, with a live elapsed timer, restart counts, OOM detection, contextual hints (e.g. "database migrations typically take 60–90s"), and — critically — the extracted **cause line** from the failing container's logs with a copy button.
+
+The page also hosts the **Anchor contract** panel — the full Compact lifecycle, driven from the UI instead of a terminal:
+
+- **Prepare runner** — boots the dedicated `node:22-bookworm-slim` machine inside the Midnight Fly app and installs the Midnight SDK onto its volume in four sequential groups. The install runs as a detached job (Fly caps `exec` at ~30s while proving takes minutes), polled until the `.ready` marker is written.
+- **Deploy contract** — runs `scripts/deploy-midnight.mjs` on the runner to prove and submit the contract's initial state; the address and deploy tx are persisted in `midnight_contracts`.
+- **Clear toolchain** — wipes `node_modules`, the npm cache and the `.ready` marker on the runner's volume without touching the volume itself, the LevelDB private state, or the deployed contract — the escape hatch for a half-finished install.
+
+The panel renders the same progressive step timeline as the stack itself, keeps a failed job's log and error visible after polling stops, and has a copy-log button. Contract deploy / anchor / verify all run on the runner, not from a local terminal.
 
 ### Verify (`/app/verify`)
 A check on a bundle a verifier has been handed. Each pass reports independently, so a partial failure tells you *which* link broke — and passes that the code cannot actually perform are reported as **not checked** rather than green:
@@ -125,6 +138,8 @@ A check on a bundle a verifier has been handed. Each pass reports independently,
 3. Confirm a *real* credential exists (a pending hosted offer with no JWT is not a credential).
 4. **Issuer signature: not verified.** The console decodes the JWT payload; it performs no JWS verification, no DID resolution and no status-list check. Simulated credentials use `alg: none` with a stub hash and are reported as proving nothing.
 5. Recompute the commitment from `digest + stored salt` and compare it to the stored commitment, then require the anchor to be on-ledger. Anchors written before salt persistence cannot be recomputed and fail closed.
+
+True on-chain verification is a separate, per-row action on the Midnight page (**Check ledger**): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
 
 True on-chain verification is a separate action on the Midnight page ("Check ledger"): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
 
