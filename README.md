@@ -207,7 +207,9 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 ## Known limitations
 
 - **Undeployed / dev network only.** The Midnight stack runs the local dev preset. There is no testnet or mainnet wiring, no faucet-funded production wallet, and no key management story beyond what the dev preset provides.
-- **Simulated Identus mode is not a trust chain.** It produces credential-shaped records for demos; only the Fly Cloud Agent mode involves real DIDs and signatures.
+- **No signature verification anywhere.** The verify page decodes credentials; it does not validate JWS, resolve issuer DIDs, or check revocation status. A "checks passed" verdict means the digest and the ledger anchor line up — nothing about issuer identity.
+- **Simulated Identus mode is not a trust chain.** It produces credential-shaped records for demos (`alg: none`, stub signature) and the verify page marks them as proving nothing. Only the Fly Cloud Agent mode involves real DIDs and signatures.
+- **PRISM DIDs are not externally resolvable.** The Fly PRISM node runs against its own database with no Cardano ledger backing, so published DIDs resolve only inside this stack. A third party cannot resolve them.
 - **Fly stacks are ephemeral and single-tenant.** One app per kind per user, no multi-region, no autoscaling, and destroy is the intended cleanup path.
 - **Log retrieval is best-effort.** With no Machines log API, a container that dies instantly can still outrun the boot-log read.
 - **Validation is structural, not full FHIR conformance.** It checks the IPS document skeleton, required sections and LOINC codes and reference resolvability — it is not a substitute for the official validator or terminology server checks.
