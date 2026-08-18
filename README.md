@@ -168,7 +168,9 @@ Tables (Lovable Cloud / Postgres):
 Security posture:
 
 - **RLS on every table**, with per-user `auth.uid()` policies, plus explicit `GRANT`s for `authenticated` and `service_role` in the same migration as each `CREATE TABLE` (PostgREST grants nothing by default — RLS alone leaves the table unreachable).
-- **Privilege escalation avoided by design**: roles are a separate table read via a security-definer function, never a boolean on a user-owned row.
+- **Privilege escalation avoided by design**: roles are a separate table read via a security-definer function, never a boolean on a user-owned row. The `user_roles` table carries explicit `WITH CHECK (false)` deny policies for INSERT/UPDATE/DELETE against `authenticated` and `anon`, and all client-side write privileges are revoked — roles are assigned only by the signup trigger / service role.
+- **SECURITY DEFINER functions are not API-callable.** `handle_new_user`, `has_role`, `touch_updated_at` are revoked from `PUBLIC`, `anon` and `authenticated`; only `service_role` may execute `has_role`, so a browser session cannot invoke them directly.
+- **Storage is owner-scoped.** The private `midnight-artifacts` bucket enforces RLS by top-level folder: a file must live under a folder named `auth.uid()::text` for any SELECT/INSERT/UPDATE/DELETE, so a user can only touch their own contract bundle.
 - **Data minimisation in credentials.** A credential carries the `summaryDigest`, the credential type, and — only when the summary has a birth date — a derived `over18` boolean. No patient name, no summary title, no raw date of birth, no clinical content.
 - **Commitments are recomputable.** `commitment = H("ips:anchor:v1" ‖ digest ‖ salt)` and the salt is persisted with the anchor. Without the salt an anchor is unverifiable, so anchors missing one fail closed instead of reading as confirmed.
 - **Secrets never reach the browser.** The Fly API token and the Identus admin key are read inside `.handler()` bodies of server functions. `*.server.ts` modules are excluded from client bundles by filename; the client only ever imports `*.functions.ts`.
