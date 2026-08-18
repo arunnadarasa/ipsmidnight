@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, Loader2, PackageCheck, Rocket } from "lucide-react";
+import { ChevronDown, Eraser, Loader2, PackageCheck, Rocket } from "lucide-react";
 import { Panel } from "@/components/SectionHeading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ import {
   getRunnerStatus,
   pollRunnerJob,
   prepareRunnerMachine,
+  resetRunnerToolchainFn,
   verifyAnchorMembership,
 } from "@/lib/midnight/runner.functions";
 
