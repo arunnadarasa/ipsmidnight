@@ -311,8 +311,9 @@ export async function repairMidnightStack(appName: string, region: string) {
 
   // Node and proof first, indexer LAST: the indexer only retries its node
   // connection on boot, so it must start against an already-listening RPC.
-  for (const kind of ["node", "proof", "indexer"] as const) {
-    const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
+  // The runner is last — it only ever dials the others.
+  for (const kind of ["node", "proof", "indexer", "runner"] as const) {
+    const volumeId = await volumeFor(appName, region, kind);
     const spec = machineConfig(kind, appName, volumeId);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     const existing = machines.find((m) => m.name === spec.name);
