@@ -283,7 +283,9 @@ async function ensureVolume(
 /** Chain data for the node, SDK + private state for the runner. */
 function volumeFor(appName: string, region: string, kind: MachineKind) {
   if (kind === "node") return ensureVolume(appName, region, NODE_VOLUME, 10);
-  if (kind === "runner") return ensureVolume(appName, region, RUNNER.volume, 5);
+  // 10 GB: node_modules for the SDK plus the npm cache (kept on the volume so a
+  // retry after a restart is mostly a cache read) does not fit in 5 GB.
+  if (kind === "runner") return ensureVolume(appName, region, RUNNER.volume, 10);
   return Promise.resolve(null);
 }
 
