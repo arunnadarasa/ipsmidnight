@@ -88,9 +88,17 @@ export function useAnchorSubmission(appPrefix: string | null | undefined) {
 function LogTail({ log }: { log: string }) {
   if (!log) return null;
   return (
-    <pre className="max-h-40 overflow-auto rounded-md bg-secondary/60 p-3 font-mono text-[11px] leading-relaxed">
-      {log}
-    </pre>
+    <div className="overflow-hidden rounded-xl border border-border bg-secondary/50">
+      <div className="flex items-center gap-1.5 border-b border-border/70 px-3 py-1.5">
+        <span className="h-2 w-2 rounded-full bg-destructive/50" />
+        <span className="h-2 w-2 rounded-full bg-warning/60" />
+        <span className="h-2 w-2 rounded-full bg-success/60" />
+        <span className="ml-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          runner log
+        </span>
+      </div>
+      <pre className="max-h-40 overflow-auto p-3 font-mono text-[11px] leading-relaxed">{log}</pre>
+    </div>
   );
 }
 
