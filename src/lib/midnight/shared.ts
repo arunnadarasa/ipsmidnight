@@ -13,6 +13,30 @@ export const IMAGES = {
   runner: "docker.io/library/node:22-bookworm-slim",
 } as const;
 
+/** Installed in order, one `npm install` per group. */
+const DEP_GROUPS = [
+  [
+    "@midnight-ntwrk/midnight-js-network-id@4.1.1",
+    "@midnight-ntwrk/midnight-js-utils@4.1.1",
+    "ws",
+  ],
+  [
+    "@midnight-ntwrk/midnight-js-contracts@4.1.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider@4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider@4.1.1",
+  ],
+  [
+    // compact-js is versioned independently of midnight-js 4.x and is not a
+    // transitive dependency of midnight-js-contracts, so it needs its own pin.
+    "@midnight-ntwrk/compact-js@2.5.3",
+    "@midnight-ntwrk/zswap@4.0.0",
+  ],
+  ["@midnight-ntwrk/wallet-sdk@1.2.0", "@midnight-ntwrk/testkit-js@4.1.1"],
+] as const;
+
+
 /**
  * The runner machine executes scripts/deploy-midnight.mjs and
  * scripts/anchor-midnight.mjs. Proving needs a long-lived proof-server session,
