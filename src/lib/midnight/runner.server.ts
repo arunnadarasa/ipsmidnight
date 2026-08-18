@@ -249,12 +249,18 @@ export async function prepareRunner(input: {
   const npm = `npm install --no-audit --no-fund --loglevel=error --prefer-offline --cache ${RUNNER.work}/npm-cache`;
   const body = [
     `echo "installing the Midnight toolchain (this takes a few minutes)"`,
+    `step "checking the runner's disk"`,
+    `df -h ${RUNNER.work} || true`,
+    `node -v && npm -v`,
     // The slim Node image usually ships curl; install it only if it is missing.
+    `step "installing curl on the runner"`,
     `command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }`,
+    `step "downloading the contract bundle"`,
     `curl -fsSL "${input.bundleUrl}" -o ${RUNNER.work}/bundle.tgz`,
     // Extracted over the top rather than after `rm -rf`: the bundle only
     // carries scripts and contract artifacts, so keeping node_modules in place
     // makes a retry after a restart reuse everything already installed.
+    `step "unpacking the contract bundle"`,
     `mkdir -p ${RUNNER.app} ${RUNNER.work}/npm-cache`,
     `tar xzf ${RUNNER.work}/bundle.tgz -C ${RUNNER.app}`,
     // Plain progress markers so the UI can show a step timeline instead of a log wall.
@@ -263,15 +269,20 @@ export async function prepareRunner(input: {
     // Cap the heap so npm reports a failure instead of being killed silently by
     // the kernel, and install in groups to keep the memory peak down.
     `export NODE_OPTIONS=--max-old-space-size=3072`,
+    `export npm_config_update_notifier=false`,
     `echo STEP:deps`,
     ...RUNNER.depGroups.flatMap((group, i) => [
-      `echo "installing group ${i + 1} of ${RUNNER.depGroups.length}"`,
-      `${npm} ${group.join(" ")}`,
+      `step "installing Midnight SDK group ${i + 1} of ${RUNNER.depGroups.length}"`,
+      // npm's own error output already went to the log; the debug log tail is
+      // what actually names an EBADENGINE / ENOSPC / registry failure.
+      `${npm} ${group.join(" ")} || { echo "--- npm debug log ---"; tail -n 60 ${RUNNER.work}/npm-cache/_logs/*-debug-0.log 2>/dev/null | tail -n 60; exit 1; }`,
       `echo STEP:deps:${i + 1}`,
     ]),
+    `step "recording the installed toolchain version"`,
     `printf %s ${RUNNER.artifactVersion} > ${RUNNER.work}/.ready`,
     `echo BOOTSTRAP_OK`,
   ].join("\n");
+
 
   const jobId = await launchJob(appName, machine.id, id, body);
   return { machine, jobId };
