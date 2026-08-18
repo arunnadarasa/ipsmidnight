@@ -112,13 +112,15 @@ The unified provisioning surface. One action provisions **both** stacks; `checkF
 Progress is rendered as a **step timeline** rather than a spinner: each step reports pending / booting / healthy / failed, with a live elapsed timer, restart counts, OOM detection, contextual hints (e.g. "database migrations typically take 60–90s"), and — critically — the extracted **cause line** from the failing container's logs with a copy button.
 
 ### Verify (`/app/verify`)
-A three-pass check on a bundle a verifier has been handed:
+A check on a bundle a verifier has been handed. Each pass reports independently, so a partial failure tells you *which* link broke — and passes that the code cannot actually perform are reported as **not checked** rather than green:
 
-1. Recompute the digest from the bundle and compare it to the credential's claim.
-2. Verify the credential itself (issuer DID, signature, status).
-3. Confirm the commitment exists on the Midnight ledger under the `ips:anchor:v1` domain.
+1. Structural IPS validation.
+2. Recompute the digest from the canonical bundle JSON and compare it to the credential's `summaryDigest` claim.
+3. Confirm a *real* credential exists (a pending hosted offer with no JWT is not a credential).
+4. **Issuer signature: not verified.** The console decodes the JWT payload; it performs no JWS verification, no DID resolution and no status-list check. Simulated credentials use `alg: none` with a stub hash and are reported as proving nothing.
+5. Recompute the commitment from `digest + stored salt` and compare it to the stored commitment, then require the anchor to be on-ledger. Anchors written before salt persistence cannot be recomputed and fail closed.
 
-Each pass reports independently, so a partial failure tells you *which* link broke.
+True on-chain verification is a separate action on the Midnight page ("Check ledger"): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
 
 ### Activity log (`/app/activity`)
 An append-only audit trail of provisioning, issuance and anchoring events per user.
