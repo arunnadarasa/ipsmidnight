@@ -112,13 +112,15 @@ The unified provisioning surface. One action provisions **both** stacks; `checkF
 Progress is rendered as a **step timeline** rather than a spinner: each step reports pending / booting / healthy / failed, with a live elapsed timer, restart counts, OOM detection, contextual hints (e.g. "database migrations typically take 60–90s"), and — critically — the extracted **cause line** from the failing container's logs with a copy button.
 
 ### Verify (`/app/verify`)
-A three-pass check on a bundle a verifier has been handed:
+A check on a bundle a verifier has been handed. Each pass reports independently, so a partial failure tells you *which* link broke — and passes that the code cannot actually perform are reported as **not checked** rather than green:
 
-1. Recompute the digest from the bundle and compare it to the credential's claim.
-2. Verify the credential itself (issuer DID, signature, status).
-3. Confirm the commitment exists on the Midnight ledger under the `ips:anchor:v1` domain.
+1. Structural IPS validation.
+2. Recompute the digest from the canonical bundle JSON and compare it to the credential's `summaryDigest` claim.
+3. Confirm a *real* credential exists (a pending hosted offer with no JWT is not a credential).
+4. **Issuer signature: not verified.** The console decodes the JWT payload; it performs no JWS verification, no DID resolution and no status-list check. Simulated credentials use `alg: none` with a stub hash and are reported as proving nothing.
+5. Recompute the commitment from `digest + stored salt` and compare it to the stored commitment, then require the anchor to be on-ledger. Anchors written before salt persistence cannot be recomputed and fail closed.
 
-Each pass reports independently, so a partial failure tells you *which* link broke.
+True on-chain verification is a separate action on the Midnight page ("Check ledger"): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
 
 ### Activity log (`/app/activity`)
 An append-only audit trail of provisioning, issuance and anchoring events per user.
@@ -138,15 +140,17 @@ Tables (Lovable Cloud / Postgres):
 | `ips_bundles` | Saved summaries, their digest and validation status |
 | `sample_bundles` | Shipped demo bundles, readable by all signed-in users |
 | `credential_records` | Issued credentials linked to a bundle |
-| `midnight_anchors` | Commitments, transaction references, contract address |
+| `midnight_anchors` | Commitments, the **salt** the commitment was derived from, transaction references, contract address |
 | `activity_log` | Audit events |
 
 Security posture:
 
 - **RLS on every table**, with per-user `auth.uid()` policies, plus explicit `GRANT`s for `authenticated` and `service_role` in the same migration as each `CREATE TABLE` (PostgREST grants nothing by default — RLS alone leaves the table unreachable).
 - **Privilege escalation avoided by design**: roles are a separate table read via a security-definer function, never a boolean on a user-owned row.
-- **Clinical content stays server-side.** Bundles are written and read through RLS-scoped queries; what circulates in credentials and on-chain is only the digest.
+- **Data minimisation in credentials.** A credential carries the `summaryDigest`, the credential type, and — only when the summary has a birth date — a derived `over18` boolean. No patient name, no summary title, no raw date of birth, no clinical content.
+- **Commitments are recomputable.** `commitment = H("ips:anchor:v1" ‖ digest ‖ salt)` and the salt is persisted with the anchor. Without the salt an anchor is unverifiable, so anchors missing one fail closed instead of reading as confirmed.
 - **Secrets never reach the browser.** The Fly API token and the Identus admin key are read inside `.handler()` bodies of server functions. `*.server.ts` modules are excluded from client bundles by filename; the client only ever imports `*.functions.ts`.
+- **Key material is not committed.** The Midnight LevelDB private-state store, `.env` and packaged bundles are git-ignored. The dev-network genesis seed, deployer secret and private-state password in `scripts/*.mjs` are the well-known Undeployed test values and are overridable via `MIDNIGHT_GENESIS_SEED`, `MIDNIGHT_DEPLOYER_SECRET_HEX` and `MIDNIGHT_PRIVATE_STORAGE_PASSWORD`. They must not be reused on a real network.
 - **Google sign-in** is enabled alongside email; anonymous sign-ups are off.
 
 ---
@@ -203,7 +207,9 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 ## Known limitations
 
 - **Undeployed / dev network only.** The Midnight stack runs the local dev preset. There is no testnet or mainnet wiring, no faucet-funded production wallet, and no key management story beyond what the dev preset provides.
-- **Simulated Identus mode is not a trust chain.** It produces credential-shaped records for demos; only the Fly Cloud Agent mode involves real DIDs and signatures.
+- **No signature verification anywhere.** The verify page decodes credentials; it does not validate JWS, resolve issuer DIDs, or check revocation status. A "checks passed" verdict means the digest and the ledger anchor line up — nothing about issuer identity.
+- **Simulated Identus mode is not a trust chain.** It produces credential-shaped records for demos (`alg: none`, stub signature) and the verify page marks them as proving nothing. Only the Fly Cloud Agent mode involves real DIDs and signatures.
+- **PRISM DIDs are not externally resolvable.** The Fly PRISM node runs against its own database with no Cardano ledger backing, so published DIDs resolve only inside this stack. A third party cannot resolve them.
 - **Fly stacks are ephemeral and single-tenant.** One app per kind per user, no multi-region, no autoscaling, and destroy is the intended cleanup path.
 - **Log retrieval is best-effort.** With no Machines log API, a container that dies instantly can still outrun the boot-log read.
 - **Validation is structural, not full FHIR conformance.** It checks the IPS document skeleton, required sections and LOINC codes and reference resolvability — it is not a substitute for the official validator or terminology server checks.

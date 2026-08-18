@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FLY_REGIONS } from "@/lib/midnight/shared";
-import { checkFlyStack, destroyFlyStack, provisionFlyStack, verifyAnchor } from "@/lib/midnight/fly.functions";
+import { checkFlyStack, destroyFlyStack, provisionFlyStack } from "@/lib/midnight/fly.functions";
 import contractInfo from "@/data/midnight-contract.undeployed.json";
 import { ContractLifecycle, useAnchorSubmission } from "@/components/deploy/ContractLifecycle";
 import { ipsCommitment, randomSaltHex } from "@/lib/ips/digest";
@@ -46,7 +46,6 @@ function MidnightConsole() {
   const provision = useServerFn(provisionFlyStack);
   const check = useServerFn(checkFlyStack);
   const destroy = useServerFn(destroyFlyStack);
-  const verify = useServerFn(verifyAnchor);
 
   const [prefix, setPrefix] = useState("");
   const [region, setRegion] = useState<string>("lhr");
@@ -115,15 +114,6 @@ function MidnightConsole() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const doVerify = useMutation({
-    mutationFn: (anchorId: string) => verify({ data: { anchorId } }),
-    onSuccess: (r) => {
-      if (r.ok) toast.success(`Confirmed on the indexer${r.blockHeight ? ` · block #${r.blockHeight}` : ""}`);
-      else toast.warning(r.detail);
-      void qc.invalidateQueries({ queryKey: ["anchors"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const prepareAnchor = useMutation({
     mutationFn: async (bundle: { id: string; title: string; digest: string | null }) => {
@@ -139,6 +129,9 @@ function MidnightConsole() {
           bundle_id: bundle.id,
           digest: bundle.digest,
           commitment,
+          // Without the salt the commitment cannot be recomputed, so nothing
+          // could ever check that this anchor belongs to this summary.
+          salt,
           network: "undeployed",
           status: "queued",
           entry_point: contractInfo.circuit,
@@ -370,8 +363,15 @@ function MidnightConsole() {
                       )}
                       Submit
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => doVerify.mutate(a.id)} disabled={doVerify.isPending}>
-                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Verify
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => anchorSubmission.verify.mutate(a.id)}
+                      disabled={
+                        anchorSubmission.verify.isPending || anchorSubmission.activeAnchorId !== null
+                      }
+                    >
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Check ledger
                     </Button>
                   </div>
                 </li>

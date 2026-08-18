@@ -22,7 +22,8 @@ import {
 import { randomSeed, simulatedCredential, simulatedDid } from "@/lib/identus/agent";
 import { FlyAgentPanel } from "@/components/identus/FlyAgentPanel";
 import { createAgentDid, issueHostedCredential, listIssuerDids } from "@/lib/identus/fly.functions";
-import { patientDisplayName, findPatient } from "@/lib/ips/validate";
+import { findPatient } from "@/lib/ips/validate";
+import { isOver18 } from "@/lib/ips/age";
 import type { FhirBundle } from "@/lib/ips/types";
 
 export const Route = createFileRoute("/app/identus")({
@@ -169,12 +170,13 @@ function IdentusConsole() {
       const patient = findPatient(bundle.bundle as unknown as FhirBundle);
       const dob = (patient?.["birthDate"] as string | undefined) ?? null;
 
+      // Data minimisation: the credential carries the digest and, at most, a
+      // derived age assurance. Name, title and birth date are the standard
+      // re-identification pair for health data and never leave the console.
       const claims = {
         summaryDigest: bundle.digest,
-        summaryTitle: bundle.title,
-        patientName: bundle.patient_name ?? patientDisplayName(patient),
-        ...(dob ? { dob } : {}),
         credentialType: "InternationalPatientSummary",
+        ...(dob ? { over18: isOver18(dob) } : {}),
       };
       const jwt = await simulatedCredential({ issuerDid, subjectDid, claims });
 
@@ -340,8 +342,9 @@ function IdentusConsole() {
             </Select>
           </div>
           <p className="text-xs text-muted-foreground">
-            The credential carries the summary digest and a date-of-birth claim — never the clinical content
-            itself. That keeps it usable for the age proof on the verification page.
+            The credential carries the summary digest and, when the summary has a birth date, a derived{" "}
+            <code>over18</code> boolean — never the patient's name, the summary title, the birth date itself, or
+            any clinical content.
           </p>
           <Button onClick={() => issue.mutate()} disabled={issue.isPending || !selectedBundle}>
             <BadgeCheck className="mr-1.5 h-4 w-4" />
@@ -361,8 +364,10 @@ function IdentusConsole() {
                     {c.state}
                   </Badge>
                   <Badge variant="outline">{c.simulated ? "simulated" : "hosted agent"}</Badge>
-                  <span className="min-w-0 truncate text-sm">
-                    {(c.claims as { summaryTitle?: string } | null)?.summaryTitle ?? "IPS credential"}
+                  <span className="min-w-0 truncate font-mono text-xs">
+                    {(c.claims as { summaryDigest?: string } | null)?.summaryDigest?.slice(0, 16) ??
+                      "IPS credential"}
+                    …
                   </span>
                 </div>
                 <TruncatedMono value={c.issuer_did} label="issuer" head={18} tail={8} />

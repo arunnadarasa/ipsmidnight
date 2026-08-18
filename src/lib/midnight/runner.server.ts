@@ -22,10 +22,20 @@ import {
   startMachine,
 } from "./fly.server";
 
-export type RunnerJobKind = "bootstrap" | "deploy" | "anchor";
+export type RunnerJobKind = "bootstrap" | "deploy" | "anchor" | "verify";
 
 export type RunnerJobResult =
-  | { ok: true; address?: string; deployTx?: string | null; txId?: string | null; blockHeight?: number | null }
+  | {
+      ok: true;
+      address?: string;
+      deployTx?: string | null;
+      txId?: string | null;
+      blockHeight?: number | null;
+      /** verify jobs: true when the commitment is in the on-chain Set. */
+      member?: boolean;
+      commitment?: string;
+      anchorCount?: number;
+    }
   | { ok: false; error: string };
 
 export type RunnerJob = {
@@ -52,6 +62,7 @@ const JOBS_DIR = `${RUNNER.work}/jobs`;
 function jobKind(id: string): RunnerJobKind {
   if (id.startsWith("deploy-")) return "deploy";
   if (id.startsWith("anchor-")) return "anchor";
+  if (id.startsWith("verify-")) return "verify";
   return "bootstrap";
 }
 
@@ -266,6 +277,35 @@ export async function startAnchorJob(input: {
   ].join("\n");
   return { jobId: await launchJob(appName, machineId, id, body), appName };
 }
+
+/**
+ * Read-only membership proof: asks the contract's own ledger view whether the
+ * commitment is in the on-chain Set. This is the only honest answer to "is this
+ * summary anchored" — the presence of a transaction hash is not.
+ */
+export async function startVerifyJob(input: {
+  appPrefix: string;
+  commitment: string;
+  contractAddress: string;
+  anchorId: string;
+}) {
+  if (!/^[0-9a-f]{64}$/.test(input.commitment)) {
+    throw new Error("The commitment must be 64 hex characters.");
+  }
+  if (!/^[0-9a-f]{64,}$/.test(input.contractAddress)) {
+    throw new Error("No deployed contract address — deploy the contract first.");
+  }
+  const { appName, machineId, urls } = await runnerFor(input.appPrefix);
+  const id = newJobId("verify", input.anchorId.replace(/-/g, ""));
+  const body = [
+    `cd ${RUNNER.app}`,
+    `node scripts/verify-midnight.mjs ${endpointArgs(urls)} --project ${RUNNER.app}` +
+      ` --address ${input.contractAddress} --commitment ${input.commitment}` +
+      ` --out ${RUNNER.out}/${id}.json`,
+  ].join("\n");
+  return { jobId: await launchJob(appName, machineId, id, body), appName };
+}
+
 
 export async function pollJob(appPrefix: string, jobId: string): Promise<RunnerJob> {
   if (!/^[a-z0-9-]+$/.test(jobId)) throw new Error("Invalid job id.");

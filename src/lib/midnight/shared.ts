@@ -29,10 +29,10 @@ export const RUNNER = {
   logs: "/work/logs",
   out: "/work/out",
   /** Bump when the compiled contract or the scripts change so runners re-bootstrap. */
-  artifactVersion: "ips-anchor-registry-1",
+  artifactVersion: "ips-anchor-registry-2",
   bucket: "midnight-artifacts",
   /** Object key inside the bucket; uploaded once from the build sandbox. */
-  object: "ips-anchor-registry-1.tgz",
+  object: "ips-anchor-registry-2.tgz",
   /** LevelDB store name — shared by every anchor; the contract keeps no per-user state. */
   store: "ips-midnight-level-db",
   /** Pinned SDK versions, identical to the header of scripts/deploy-midnight.mjs. */
