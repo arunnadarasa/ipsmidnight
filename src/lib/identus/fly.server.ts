@@ -3,13 +3,13 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   AGENT_INIT_EXEC,
   AGENT_LOG_PATH,
-  IDENTUS_DB,
   IDENTUS_IMAGES,
   JAVA_TOOL_OPTIONS,
   postgresInitSql,
   identusStackUrls,
   type IdentusStackUrls,
 } from "./fly-shared";
+import { identusDbCreds } from "./db-creds.server";
 
 
 const MACHINES_API = "https://api.machines.dev/v1";
