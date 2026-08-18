@@ -59,7 +59,27 @@ export const prepareRunnerMachine = createServerFn({ method: "POST" })
     return result;
   });
 
+/**
+ * Clears a half-finished toolchain install so the next Prepare runner starts
+ * clean. The volume, private state and deployed contract are untouched.
+ */
+export const resetRunnerToolchainFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string }) => ({ appPrefix: validPrefix(input.appPrefix) }))
+  .handler(async ({ data, context }) => {
+    const { resetRunnerToolchain } = await import("./runner.server");
+    const result = await resetRunnerToolchain(data.appPrefix);
+    await context.supabase.from("activity_log").insert({
+      user_id: context.userId,
+      kind: "midnight.runner.reset",
+      summary: `Cleared the contract runner's toolchain on ${data.appPrefix}-midnight`,
+      metadata: {} as never,
+    });
+    return result;
+  });
+
 export const deployAnchorContract = createServerFn({ method: "POST" })
+
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { appPrefix: string }) => ({ appPrefix: validPrefix(input.appPrefix) }))
   .handler(async ({ data, context }) => {
