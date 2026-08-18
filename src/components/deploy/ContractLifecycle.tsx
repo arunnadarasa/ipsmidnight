@@ -117,9 +117,10 @@ export function useAnchorSubmission(appPrefix: string | null | undefined) {
   };
 }
 
-export function LogTail({ log }: { log: string }) {
-  const [open, setOpen] = useState(false);
+export function LogTail({ log, defaultOpen = false }: { log: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   if (!log) return null;
+
   return (
     <div className="space-y-2">
       <Button
