@@ -19,6 +19,7 @@ import {
   execOnMachine,
   findMachineByName,
   flyConfigured,
+  machineEventSummary,
   startMachine,
 } from "./fly.server";
 
