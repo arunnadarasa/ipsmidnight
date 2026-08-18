@@ -27,6 +27,32 @@ import { ipsCommitment, randomSaltHex } from "@/lib/ips/digest";
 
 const PLACEHOLDER_ADDRESS = "0".repeat(64);
 
+type AnchorTone = {
+  dot: "ok" | "pending" | "error" | "idle";
+  badge: "default" | "secondary" | "destructive" | "outline";
+  label: string;
+};
+
+/** One mapping so the dot and the badge can never disagree about an anchor. */
+function anchorTone(status: string | null | undefined): AnchorTone {
+  switch (status) {
+    case "confirmed":
+      return { dot: "ok", badge: "default", label: "confirmed on ledger" };
+    case "anchored":
+      return { dot: "ok", badge: "secondary", label: "anchored · not re-checked" };
+    case "error":
+      return { dot: "error", badge: "destructive", label: "error" };
+    case "proving":
+      return { dot: "pending", badge: "outline", label: "proving" };
+    case "queued":
+      return { dot: "pending", badge: "outline", label: "queued" };
+    default:
+      return { dot: "idle", badge: "outline", label: status ?? "unknown" };
+  }
+}
+
+
+
 export const Route = createFileRoute("/app/midnight")({
   head: () => ({
     meta: [
