@@ -208,7 +208,7 @@ function VerifyWorkspace() {
           {checks ? (
             <ul className="space-y-2">
               {checks.map((c) => (
-                <li key={c.label} className="rounded-md border border-border bg-card/40 px-3 py-2">
+                <li key={c.label} className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-3 py-2">
                   <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                     {c.ok === null ? (
                       <ShieldQuestion className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />

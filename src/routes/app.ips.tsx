@@ -192,7 +192,7 @@ function IpsWorkspace() {
               <Panel title="Start from a sample" subtitle="Reference bundles you can adapt">
                 <ul className="space-y-2">
                   {samples?.map((s) => (
-                    <li key={s.id} className="rounded-md border border-border bg-card/40 p-3">
+                    <li key={s.id} className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 p-3">
                       <p className="text-sm font-medium">{s.title}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">{s.description}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
