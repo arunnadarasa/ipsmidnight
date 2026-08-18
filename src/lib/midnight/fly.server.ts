@@ -252,19 +252,24 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
 }
 
 /**
- * Reuses an existing chain volume in the region or creates one. Returns null on
- * failure so a missing volume degrades to ephemeral chain data rather than
- * blocking the whole provision.
+ * Reuses an existing volume in the region or creates one. Returns null on
+ * failure so a missing volume degrades to ephemeral data rather than blocking
+ * the whole provision.
  */
-async function ensureNodeVolume(appName: string, region: string): Promise<string | null> {
+async function ensureVolume(
+  appName: string,
+  region: string,
+  name: string,
+  sizeGb: number,
+): Promise<string | null> {
   try {
     const volumes =
       (await flyOptional<{ id: string; name: string; region: string }[]>(`/apps/${appName}/volumes`)) ?? [];
-    const existing = volumes.find((v) => v.name === NODE_VOLUME && v.region === region);
+    const existing = volumes.find((v) => v.name === name && v.region === region);
     if (existing) return existing.id;
     const created = await fly<{ id: string }>(`/apps/${appName}/volumes`, {
       method: "POST",
-      body: JSON.stringify({ name: NODE_VOLUME, region, size_gb: 10 }),
+      body: JSON.stringify({ name, region, size_gb: sizeGb }),
     });
     return created.id;
   } catch {
@@ -272,13 +277,20 @@ async function ensureNodeVolume(appName: string, region: string): Promise<string
   }
 }
 
+/** Chain data for the node, SDK + private state for the runner. */
+function volumeFor(appName: string, region: string, kind: MachineKind) {
+  if (kind === "node") return ensureVolume(appName, region, NODE_VOLUME, 10);
+  if (kind === "runner") return ensureVolume(appName, region, RUNNER.volume, 5);
+  return Promise.resolve(null);
+}
+
 async function ensureMachine(
   appName: string,
-  kind: "node" | "indexer" | "proof",
+  kind: MachineKind,
   region: string,
 ): Promise<FlyMachine> {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
-  const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
+  const volumeId = await volumeFor(appName, region, kind);
   const spec = machineConfig(kind, appName, volumeId);
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
