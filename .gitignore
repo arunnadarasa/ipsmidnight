@@ -30,3 +30,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local Midnight wallet / private-state store (key material — never commit)
+ips-midnight-level-db/
+midnight-level-db/
+*.tgz
+
+# Environment (Lovable Cloud regenerates this locally)
+.env
