@@ -155,3 +155,15 @@ export function runnerRestingSteps(status: {
   ];
   return steps;
 }
+
+/**
+ * The runner log is a 3 kB tail, so an early marker can scroll out of view and
+ * make a completed step look pending again. Progress is monotonic in reality,
+ * so clamp the first `minDone` steps to done.
+ */
+export function clampSteps(steps: StackStep[], minDone: number): StackStep[] {
+  if (minDone <= 0) return steps;
+  return steps.map((s, i) =>
+    i < minDone && s.state !== "failed" ? { ...s, state: "done" as StepState } : s,
+  );
+}
