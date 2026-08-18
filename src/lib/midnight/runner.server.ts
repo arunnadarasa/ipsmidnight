@@ -232,18 +232,29 @@ export async function prepareRunner(input: {
   if (machine.state !== "started") await startMachine(appName, machine.id);
 
   const id = newJobId("bootstrap");
+  const npm = `npm install --no-audit --no-fund --loglevel=error --prefer-offline --cache ${RUNNER.work}/npm-cache`;
   const body = [
     `echo "installing the Midnight toolchain (this takes a few minutes)"`,
     // The slim Node image usually ships curl; install it only if it is missing.
     `command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }`,
     `curl -fsSL "${input.bundleUrl}" -o ${RUNNER.work}/bundle.tgz`,
-    `rm -rf ${RUNNER.app} && mkdir -p ${RUNNER.app}`,
+    // Extracted over the top rather than after `rm -rf`: the bundle only
+    // carries scripts and contract artifacts, so keeping node_modules in place
+    // makes a retry after a restart reuse everything already installed.
+    `mkdir -p ${RUNNER.app} ${RUNNER.work}/npm-cache`,
     `tar xzf ${RUNNER.work}/bundle.tgz -C ${RUNNER.app}`,
     // Plain progress markers so the UI can show a step timeline instead of a log wall.
     `echo STEP:staged`,
     `cd ${RUNNER.app}`,
+    // Cap the heap so npm reports a failure instead of being killed silently by
+    // the kernel, and install in groups to keep the memory peak down.
+    `export NODE_OPTIONS=--max-old-space-size=3072`,
     `echo STEP:deps`,
-    `npm install --no-audit --no-fund --loglevel=error ${RUNNER.deps.join(" ")}`,
+    ...RUNNER.depGroups.flatMap((group, i) => [
+      `echo "installing group ${i + 1} of ${RUNNER.depGroups.length}"`,
+      `${npm} ${group.join(" ")}`,
+      `echo STEP:deps:${i + 1}`,
+    ]),
     `printf %s ${RUNNER.artifactVersion} > ${RUNNER.work}/.ready`,
     `echo BOOTSTRAP_OK`,
   ].join("\n");
