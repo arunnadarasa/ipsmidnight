@@ -50,12 +50,13 @@ The app is a TanStack Start (React 19 + Vite) application. Everything privileged
               │  auth · RLS · summaries  │   │  provision / exec / destroy │
               │  credentials · anchors   │   └───┬────────────────────┬────┘
               └──────────────────────────┘       │                    │
-                                     ┌───────────▼─────────┐  ┌───────▼──────────────┐
-                                     │ Identus stack (Fly) │  │ Midnight stack (Fly) │
-                                     │ postgres:16-alpine  │  │ midnight-node 1.0.0  │
-                                     │ prism-node 2.5.0    │  │ indexer-standalone   │
-                                     │ cloud-agent 1.40.0  │  │ proof-server 8.1.0   │
-                                     └─────────────────────┘  └──────────────────────┘
+                                      ┌───────────▼─────────┐  ┌──────────▼──────────────┐
+                                      │ Identus stack (Fly) │  │ Midnight stack (Fly)    │
+                                      │ postgres:16-alpine  │  │ midnight-node 1.0.0     │
+                                      │ prism-node 2.5.0    │  │ indexer-standalone 4.3.3│
+                                      │ cloud-agent 1.40.0  │  │ proof-server 8.1.0      │
+                                      └─────────────────────┘  │ runner (node:22-slim)   │
+                                                               └─────────────────────────┘
 ```
 
 Machines inside a Fly app talk to each other over Fly's private **6PN** network (`<group>.process.<app>.internal`), which is **IPv6-only** — a detail that caused most of the early boot failures (see [Issues](#issues-encountered-and-how-they-were-solved)).
@@ -65,15 +66,20 @@ Key modules:
 | Path | Role |
 | --- | --- |
 | `src/lib/ips/{types,builder,validate,digest}.ts` | IPS section specs, form-state → FHIR bundle builder, structural validator, canonical SHA-256 digest |
-| `src/lib/midnight/shared.ts` | Pinned Midnight images, indexer env contract, 6PN + public URL helpers, `ips:anchor:v1` domain separator |
-| `src/lib/midnight/fly.server.ts` | Fly Machines client for the node / indexer / proof-server stack |
+| `src/lib/midnight/shared.ts` | Pinned Midnight images, runner SDK pins, indexer env contract, 6PN + public URL helpers, `ips:anchor:v1` domain separator |
+| `src/lib/midnight/fly.server.ts` | Fly Machines client for the node / indexer / proof-server / runner stack |
+| `src/lib/midnight/runner.server.ts` | The runner machine: launches, polls and reads results for deploy / anchor / verify jobs over Fly `exec` |
+| `src/lib/runner-steps.ts` | Maps a runner job (kind + log tail + result) onto the same step-timeline model as the Deploy page |
 | `src/lib/identus/fly-shared.ts` | Identus images, four-database layout, Postgres init SQL, JVM IPv6 flags, agent boot-log wrapper |
 | `src/lib/identus/{fly,cloud-agent}.server.ts` | Provisioning, health probes, log tailing, DID publication, connectionless issuance |
 | `src/lib/stack.functions.ts` | Unified `provision / check / repair / repairIdentusOnly / destroy / list` server functions |
 | `src/lib/stack-steps.ts` | Derives an ordered, human-readable step list from raw machine states + health probes |
 | `src/components/deploy/StackTimeline.tsx` | Progressive deployment timeline UI with live boot timers and error extraction |
+| `src/components/deploy/ContractLifecycle.tsx` | In-app contract lifecycle panel: prepare runner, deploy contract, clear toolchain, per-row anchor/verify with step timeline + copy-log |
 | `contracts/IpsAnchorRegistry.compact` | The anchoring contract; compiled artifacts under `contracts/managed`, ZK keys under `public/keys` and `public/zkir` |
 | `scripts/deploy-midnight.mjs` | Deploys the compiled contract against a provisioned Fly stack |
+| `scripts/anchor-midnight.mjs` | Submits a commitment to the deployed contract and writes the tx reference |
+| `scripts/verify-midnight.mjs` | Read-only ledger membership check — queries the indexer and calls the contract's `ledger()` view |
 
 ---
 
@@ -104,12 +110,25 @@ Two modes, selectable in the UI:
 Issued credentials are recorded against the summary they attest.
 
 ### Midnight console (`/app/midnight`)
-Stack status (node / indexer / proof server), the resolved indexer GraphQL and proof-server endpoints, and the anchoring action: submit the IPS digest as a commitment to `IpsAnchorRegistry` and store the resulting transaction reference.
+Stack status (node / indexer / proof server / runner), the resolved indexer GraphQL and proof-server endpoints, and the anchoring action. Each saved summary can be queued as an anchor; each anchor row carries its commitment and (once submitted) its transaction reference, and exposes two actions:
+
+- **Submit / Re-anchor** — queues the commitment on the runner, which calls `anchorSummary` on the deployed contract and writes back the tx hash and block height. A submitted anchor reads as **anchored · not re-checked** until you explicitly verify it — the presence of a transaction hash is *not* treated as verification.
+- **Check ledger** — runs `scripts/verify-midnight.mjs` on the runner: a read-only query of the indexer for the contract's public state, then a call to the generated `ledger()` view's `commitments.member(commitment)`. The toast reports whether the commitment is in the on-chain Set.
+
+Both actions render a per-row step timeline (wallet sync → proving → confirmed / reading ledger → answer) and a collapsible runner log with a copy button.
 
 ### Deploy console (`/app/deploy`)
 The unified provisioning surface. One action provisions **both** stacks; `checkFullStack` polls them; `repairFullStack` re-applies machine metadata and config; `repairIdentusOnly` ("Fix agent DB") recreates just the Identus Postgres so its init SQL reruns without disturbing a healthy Midnight stack; `destroyFullStack` tears everything down.
 
 Progress is rendered as a **step timeline** rather than a spinner: each step reports pending / booting / healthy / failed, with a live elapsed timer, restart counts, OOM detection, contextual hints (e.g. "database migrations typically take 60–90s"), and — critically — the extracted **cause line** from the failing container's logs with a copy button.
+
+The page also hosts the **Anchor contract** panel — the full Compact lifecycle, driven from the UI instead of a terminal:
+
+- **Prepare runner** — boots the dedicated `node:22-bookworm-slim` machine inside the Midnight Fly app and installs the Midnight SDK onto its volume in four sequential groups. The install runs as a detached job (Fly caps `exec` at ~30s while proving takes minutes), polled until the `.ready` marker is written.
+- **Deploy contract** — runs `scripts/deploy-midnight.mjs` on the runner to prove and submit the contract's initial state; the address and deploy tx are persisted in `midnight_contracts`.
+- **Clear toolchain** — wipes `node_modules`, the npm cache and the `.ready` marker on the runner's volume without touching the volume itself, the LevelDB private state, or the deployed contract — the escape hatch for a half-finished install.
+
+The panel renders the same progressive step timeline as the stack itself, keeps a failed job's log and error visible after polling stops, and has a copy-log button. Contract deploy / anchor / verify all run on the runner, not from a local terminal.
 
 ### Verify (`/app/verify`)
 A check on a bundle a verifier has been handed. Each pass reports independently, so a partial failure tells you *which* link broke — and passes that the code cannot actually perform are reported as **not checked** rather than green:
@@ -120,7 +139,9 @@ A check on a bundle a verifier has been handed. Each pass reports independently,
 4. **Issuer signature: not verified.** The console decodes the JWT payload; it performs no JWS verification, no DID resolution and no status-list check. Simulated credentials use `alg: none` with a stub hash and are reported as proving nothing.
 5. Recompute the commitment from `digest + stored salt` and compare it to the stored commitment, then require the anchor to be on-ledger. Anchors written before salt persistence cannot be recomputed and fail closed.
 
-True on-chain verification is a separate action on the Midnight page ("Check ledger"): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
+True on-chain verification is a separate, per-row action on the Midnight page (**Check ledger**): a read-only runner job (`scripts/verify-midnight.mjs`) loads the contract's public state from the indexer and asks the generated `ledger()` view whether `commitments.member(commitment)` holds. The existence of a transaction hash is **not** treated as verification anywhere.
+
+
 
 ### Activity log (`/app/activity`)
 An append-only audit trail of provisioning, issuance and anchoring events per user.
@@ -141,12 +162,15 @@ Tables (Lovable Cloud / Postgres):
 | `sample_bundles` | Shipped demo bundles, readable by all signed-in users |
 | `credential_records` | Issued credentials linked to a bundle |
 | `midnight_anchors` | Commitments, the **salt** the commitment was derived from, transaction references, contract address |
+| `midnight_contracts` | Deployed contract address + deploy tx per user/app-prefix, so anchors survive a destroyed runner volume |
 | `activity_log` | Audit events |
 
 Security posture:
 
 - **RLS on every table**, with per-user `auth.uid()` policies, plus explicit `GRANT`s for `authenticated` and `service_role` in the same migration as each `CREATE TABLE` (PostgREST grants nothing by default — RLS alone leaves the table unreachable).
-- **Privilege escalation avoided by design**: roles are a separate table read via a security-definer function, never a boolean on a user-owned row.
+- **Privilege escalation avoided by design**: roles are a separate table read via a security-definer function, never a boolean on a user-owned row. The `user_roles` table carries explicit `WITH CHECK (false)` deny policies for INSERT/UPDATE/DELETE against `authenticated` and `anon`, and all client-side write privileges are revoked — roles are assigned only by the signup trigger / service role.
+- **SECURITY DEFINER functions are not API-callable.** `handle_new_user`, `has_role`, `touch_updated_at` are revoked from `PUBLIC`, `anon` and `authenticated`; only `service_role` may execute `has_role`, so a browser session cannot invoke them directly.
+- **Storage is owner-scoped.** The private `midnight-artifacts` bucket enforces RLS by top-level folder: a file must live under a folder named `auth.uid()::text` for any SELECT/INSERT/UPDATE/DELETE, so a user can only touch their own contract bundle.
 - **Data minimisation in credentials.** A credential carries the `summaryDigest`, the credential type, and — only when the summary has a birth date — a derived `over18` boolean. No patient name, no summary title, no raw date of birth, no clinical content.
 - **Commitments are recomputable.** `commitment = H("ips:anchor:v1" ‖ digest ‖ salt)` and the salt is persisted with the anchor. Without the salt an anchor is unverifiable, so anchors missing one fail closed instead of reading as confirmed.
 - **Secrets never reach the browser.** The Fly API token and the Identus admin key are read inside `.handler()` bodies of server functions. `*.server.ts` modules are excluded from client bundles by filename; the client only ever imports `*.functions.ts`.
@@ -159,16 +183,20 @@ Security posture:
 
 `contracts/IpsAnchorRegistry.compact` is an **append-only commitment registry**. It exposes a circuit that takes a commitment derived from `(IPS_DOMAIN, digest)` and inserts it into a ledger set, refusing duplicates. Reads are membership checks — the contract stores no patient data, no identifiers, and no metadata that could be correlated back to a person.
 
-The toolchain flow used here is deliberately unusual and worth calling out: the **Compact compiler runs in the Lovable Linux sandbox**, not on a developer laptop.
+The toolchain flow used here is deliberately unusual and worth calling out: the **Compact compiler runs in the Lovable Linux sandbox**, not on a developer laptop; and **contract deploy / anchor / verify run on a dedicated runner machine inside the Fly app**, not from a terminal. The runner is a `node:22-bookworm-slim` machine that installs the Midnight SDK onto a 10 GB volume and executes the scripts as detached jobs polled over Fly's `exec` API — because proving needs a persistent disk and long-lived proof-server sessions that the app's serverless runtime cannot host.
 
 ```sh
 # in the sandbox
 compact compile contracts/IpsAnchorRegistry.compact contracts/managed
 # compiled ZK keys / IR are published under public/keys and public/zkir
-node scripts/deploy-midnight.mjs   # deploys against the provisioned Fly stack
+
+# from the app UI (Deploy → Anchor contract), the runner then runs:
+node scripts/deploy-midnight.mjs   # prove + submit the initial contract state
+node scripts/anchor-midnight.mjs   # submit a commitment to the deployed contract
+node scripts/verify-midnight.mjs   # read-only: is the commitment in the on-chain Set?
 ```
 
-Deployment targets the Fly-hosted Undeployed stack over public HTTPS (indexer GraphQL + proof server), with the node's RPC reached over 6PN from a one-shot machine in the same Fly app.
+The SDK is pinned in `src/lib/midnight/shared.ts` (`DEP_GROUPS`) and installed in four sequential groups to keep the runner's memory peak down; the `artifactVersion` marker on the volume forces a re-bootstrap when the pins change. Deployment targets the Fly-hosted Undeployed stack over public HTTPS (indexer GraphQL + proof server), with the node's RPC reached over TLS.
 
 ---
 
@@ -177,11 +205,14 @@ Deployment targets the Fly-hosted Undeployed stack over public HTTPS (indexer Gr
 - **Hard server/client boundary.** `*.server.ts` for anything that touches a credential; `*.functions.ts` as thin `createServerFn` wrappers with nothing at module scope but imports, types and the exported declarations. Server-function splitting deletes runtime siblings, so helpers live in imported modules.
 - **No browser-only library in the SSR graph.** Midnight's JS SDK is loaded lazily on the client, never statically imported from a route that server-renders.
 - **Every image tag pinned.** `proof-server:latest` shipped incompatible proving keys mid-demo; tags are now fixed and the reason is a comment in `shared.ts`.
+- **Every SDK version pinned, including transitive peers.** `compact-js` and `midnight-js` version independently; a caret on an alpha (`compact-js@2.5.3` → `ledger-v9@^0.1.0-alpha.1`) can point at a range that was never published and fail with `ETARGET`. All four `DEP_GROUPS` are exact-pinned in `shared.ts`.
 - **Env contracts documented next to the spec.** Indexer 4.x refuses to boot unless every `APP__INFRA__*` key is present, so the full set lives in one exported constant instead of being scattered across the provisioner.
-- **Idempotent, granular recovery.** Provision, check, repair, repair-Identus-only and destroy are separate operations; repairing a broken agent must not restart a healthy ledger.
+- **Idempotent, granular recovery.** Provision, check, repair, repair-Identus-only and destroy are separate operations; repairing a broken agent must not restart a healthy ledger. The runner has its own escape hatch — `resetRunnerToolchain` clears a half-finished install without touching the volume or the deployed contract.
 - **Errors are surfaced, not swallowed.** Every non-OK provider response logs and returns the upstream status *and* body. A generic 500 during infrastructure bring-up costs hours.
-- **Design tokens, not hardcoded colours.** A "Midnight dark" clinical theme (Sora / Manrope) defined in `src/styles.css`; components use semantic tokens.
-- **Mobile-first review.** Headings and panel actions stack on small screens, tab strips scroll horizontally, long hashes and IDs wrap instead of overflowing, touch targets are enlarged, and the app header is sticky.
+- **Long-running jobs are observable from the start.** Runner jobs run detached (Fly caps `exec` at ~30s) and are polled; each writes step markers, a 30 s heartbeat, a `step`-named "what failed" label, and a result file. A killed job (no result + not alive) is reported as a likely OOM restart via `machineEventSummary`, not "still running".
+- **Progress is monotonic.** The runner log is a 3 kB rolling tail, so an early marker can scroll out of view and make a completed step look pending again; `useMonotonicSteps` / `clampSteps` lock done steps to done.
+- **Design tokens, not hardcoded colours.** An "Arctic Clean Light" clinical theme (ice-blue surfaces, glass-morphism, Sora / Manrope) defined in `src/styles.css`; components use semantic tokens.
+- **Mobile-first review.** Headings and panel actions stack on small screens, tab strips scroll horizontally, long hashes and IDs wrap instead of overflowing, touch targets are enlarged, the app header is sticky, and anchor rows stack metadata-first with two equal full-width buttons.
 
 ---
 
@@ -201,6 +232,10 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 | The role fix didn't take on an existing stack | Postgres init scripts run only against an **empty** data directory | `repairIdentusOnly` destroys and recreates just the Identus Postgres machine so init reruns — surfaced as a **Fix agent DB** button |
 | Health probes spun forever while a machine was already dead | Step state was derived from probe results alone | `stack-steps.ts` now derives state from machine state first and short-circuits downstream probes once a boot failure is detected; `exitSummary` reports restart counts and OOM kills |
 | Two speculative "fixes" that were wrong: adding `DEFAULT_WALLET_SEED` (derived from the admin key) and a duplicate `POSTGRES_*` env group | Guesses, not findings. Research into the agent's `application.conf` showed the wallet seed is auto-generated when absent, and the Postgres secret-storage backend reuses the existing `AGENT_DB_*` variables — there are no bare `POSTGRES_*` bindings | Both reverted. Recorded here because they cost a debugging cycle and made the real error harder to see |
+| Runner stalled at "Installing the Midnight SDK", then exited 1 | The `node:18` runner was OOM-killed during a parallel `npm install` of the four SDK groups | Raised the runner to 4 vCPU / 4 GB (`shared-cpu-2x` → `performance-1x`) with a 10 GB volume; install groups run sequentially with a persistent `~/.npm` cache and a 30 s heartbeat |
+| Runner install failed with `npm error ETARGET — No matching version for @midnight-ntwrk/ledger-v9@^0.1.0-alpha.1` | `compact-js@2.5.3` transitively depends on an alpha `ledger-v9` range that was never published to npm | Pinned to `compact-js@2.5.1` (resolves cleanly), exact-pinned all four `DEP_GROUPS`, and added `artifactVersion` on the volume so a pin change forces a clean re-bootstrap; `resetRunnerToolchain` clears a half-finished install |
+| A completed runner step looked pending again after polling | The 3 kB rolling log tail scrolled the early step marker out of view, so the step appeared to restart | `useMonotonicSteps` / `clampSteps` lock a step to "done" once its marker has been seen; polling only ever *adds* progress |
+| A failed deploy job disappeared from the panel | Polling stopped on `JOB_FAILED` and the error/log were discarded | `ContractLifecycle.tsx` now persists the failed job's `error` and `log` (auto-expanded) and names the failing command + npm debug-log tail |
 
 ---
 
@@ -227,6 +262,10 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 6. **Pin digests, not just tags.** `latest` broke a demo; tags can still be re-pushed. Pin by digest and record the resolved digest in `fly_deployments` so a stack is reproducible.
 7. **Have a fast smoke test separate from the full flow.** A "stack healthy?" probe that runs in seconds — node RPC responds, indexer answers a trivial GraphQL query, agent returns `/_system/health`, Postgres has all four databases and roles — instead of discovering breakage eight steps into a UI flow.
 8. **Split the IPS work from the infrastructure work sooner.** The clinical logic (builder, validator, digest) is pure, testable and was never the problem; it should have been unit-tested and frozen early so infrastructure debugging couldn't destabilise it.
+9. **Treat long-running jobs as first-class, not `exec` hacks.** The runner is a detached job polled over a 30 s-capped `exec` API, with hand-rolled heartbeats, step markers, result files and monotonic-step clamping. Next time: a real job queue (the contract lifecycle could be a server function writing rows a runner worker consumes) with a websocket/SSE progress stream, so "is it still running?" is a query, not a poll-and-pray.
+10. **Exact-pin every transitive dependency, especially alphas.** `compact-js@2.5.3` pointed at an unpublished `ledger-v9` alpha and failed with `ETARGET` minutes into an install. Caret ranges on pre-1.0 / alpha packages are load-bearing; a lockfile or exact pins in the spec would have caught it before the first runner boot.
+11. **Distinguish "submitted" from "verified" in the data model.** The first version treated a transaction hash as proof. Persisting a separate `verified_at` / on-ledger flag — and making the UI's primary action "Check ledger" only after an anchor exists — keeps the trust story honest: submission is a claim, membership is the proof.
+12. **Bring the contract lifecycle into the UI on day one.** Doing deploy/anchor/verify from a terminal, then porting it, meant two sources of truth and a UI that lagged the scripts. Next time the runner + scripts are the only path; the terminal is never the default.
 
 ---
 
