@@ -35,24 +35,18 @@ export const RUNNER = {
   object: "ips-anchor-registry-2.tgz",
   /** LevelDB store name — shared by every anchor; the contract keeps no per-user state. */
   store: "ips-midnight-level-db",
-  /** Pinned SDK versions, identical to the header of scripts/deploy-midnight.mjs. */
-  deps: [
-    "@midnight-ntwrk/midnight-js-contracts@4.1.1",
-    "@midnight-ntwrk/midnight-js-node-zk-config-provider@4.1.1",
-    "@midnight-ntwrk/midnight-js-level-private-state-provider@4.1.1",
-    "@midnight-ntwrk/midnight-js-http-client-proof-provider@4.1.1",
-    "@midnight-ntwrk/midnight-js-indexer-public-data-provider@4.1.1",
-    "@midnight-ntwrk/midnight-js-network-id@4.1.1",
-    "@midnight-ntwrk/midnight-js-utils@4.1.1",
-    // compact-js is versioned independently of midnight-js 4.x and is not a
-    // transitive dependency of midnight-js-contracts, so it needs its own pin.
-    "@midnight-ntwrk/compact-js@2.5.3",
-    "@midnight-ntwrk/wallet-sdk@1.2.0",
-    "@midnight-ntwrk/testkit-js@4.1.1",
-    "@midnight-ntwrk/zswap@4.0.0",
-    "ws",
-  ],
+  /**
+   * Pinned SDK versions, identical to the header of scripts/deploy-midnight.mjs,
+   * split into groups. One `npm install` of the whole set peaked the runner's
+   * memory and was killed mid-install with no error; smaller groups keep the
+   * peak down, let a retry reuse what is already on the volume, and give the UI
+   * something to advance through during the long phase.
+   */
+  depGroups: DEP_GROUPS,
+  /** Flattened view, for anything that just needs the full list. */
+  deps: DEP_GROUPS.flat(),
 } as const;
+
 
 /** Indexer 4.x refuses to boot unless every APP__INFRA__ key is present. */
 export const INDEXER_ENV = {
