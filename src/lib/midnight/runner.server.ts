@@ -143,7 +143,12 @@ const LOG_MARK = "===LOG===";
 const PID_MARK = "===PID===";
 
 /** Reads a job's result file, log tail, and whether its wrapper is still alive. */
-export async function readJob(appName: string, machineId: string, id: string): Promise<RunnerJob> {
+export async function readJob(
+  appName: string,
+  machineId: string,
+  id: string,
+  tailBytes = 3000,
+): Promise<RunnerJob> {
   const out = await execOnMachine(
     appName,
     machineId,
@@ -151,7 +156,8 @@ export async function readJob(appName: string, machineId: string, id: string): P
       `echo ${RESULT_MARK}`,
       `cat ${RUNNER.out}/${id}.json 2>/dev/null`,
       `echo ${LOG_MARK}`,
-      `tail -c 3000 ${RUNNER.logs}/${id}.log 2>/dev/null`,
+      `tail -c ${tailBytes} ${RUNNER.logs}/${id}.log 2>/dev/null`,
+
       `echo ${PID_MARK}`,
       // /proc beats pgrep/ps: procps is not installed in the slim Node image.
       `p=$(cat ${RUNNER.out}/${id}.pid 2>/dev/null); if [ -n "$p" ] && [ -d /proc/$p ]; then echo alive; else echo gone; fi`,
