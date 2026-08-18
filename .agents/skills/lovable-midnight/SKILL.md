@@ -890,3 +890,93 @@ one instruction the user needs ("add the secret").
 - Running proving work inside the app runtime instead of on a persistent runner machine.
 - Assuming `.internal` / `.flycast` reachability instead of probing it from the consuming machine.
 
+
+---
+
+## 2026-08 update — ipsmidnight hard-won lessons (runner toolchain, job observability, anchor UX)
+
+Source: `github.com/arunnadarasa/ipsmidnight` (IPS Compass — International Patient Summary anchoring
+on Undeployed via a Fly-hosted stack plus a persistent `runner` machine). These rules come from
+getting deploy → anchor → verify green end-to-end from inside the app UI. Where they contradict
+older sections, these win.
+
+### 1. Pin the whole Compact/Midnight toolchain — including transitive alphas
+
+- `@midnight-ntwrk/compact-js@2.5.3` depends on `@midnight-ntwrk/ledger-v9@^0.1.0-alpha.1`, which is
+  **not published**. Every runner install dies with
+  `npm error code ETARGET` / `notarget No matching version found for @midnight-ntwrk/ledger-v9@^0.1.0-alpha.1`.
+  Pin `compact-js@2.5.1` — it resolves cleanly and has no `ledger-v9` edge.
+- Runner bootstrap installs **exact pinned versions only**. Never `@latest`, never a caret on a
+  Midnight package. A toolchain bump is a deliberate, tested change with a bundle-version bump.
+- Before retrying an install, delete stale `package-lock.json` and `node_modules` from the
+  half-finished attempt — otherwise the bad resolution is cached on the volume forever and every
+  retry reproduces the same failure.
+- Ship a **Clear toolchain** action so the user can reset a broken install without destroying the
+  volume (and thereby the chain/private state).
+
+### 2. A stalled install on a runner machine is an OOM kill, not a hang
+
+Symptom: the install step stops mid-way with no error line, the UI retries forever, and the job
+eventually exits `status=1`.
+
+- Give the runner real resources: **4 vCPU / 4 GB RAM, 10 GB volume**. The Midnight SDK install is
+  memory-hungry; 1 GB machines die silently.
+- Install in **small sequential groups** with a persistent npm cache on the volume, not one giant
+  `npm i`.
+- Emit a **heartbeat every ~30 s** so the UI can distinguish "slow" from "dead".
+- Surface Fly **machine events** (OOM flag, exit code) in the UI, not just the log tail — the log
+  tail of an OOM-killed process is empty, which is exactly why it looks like a hang.
+
+### 3. Detached jobs need step markers, not raw logs
+
+- Runner scripts print explicit machine-readable markers: `STEP_<name>` on entry and
+  `JOB_FAILED status=<n> during: <phase>` on exit. The UI maps them onto a **monotonic** step
+  timeline (identical model to the stack deploy page) with per-step timers and a progress bar.
+  Monotonic matters: never let a later log line move the timeline backwards.
+- On failure, name the **exact command** that failed and include the npm debug-log tail.
+- **Persist the failed job's state and log** (auto-expanded) after the run ends. A toast alone loses
+  the only diagnostic the user could have pasted.
+- Always ship a **copy-log** button. And never pipe long proving logs through `head`/`awk` —
+  SIGPIPE kills the prove and the failure looks flaky.
+
+### 4. Submitted ≠ verified — one status mapping, honest labels
+
+- A transaction that landed on-chain is `anchored`, not `verified`. **Ledger membership is only
+  confirmed by an explicit read-only check** against the contract's public state
+  (`commitments.member(commitment)` via the indexer). Until that runs, label the row
+  "anchored · not re-checked".
+- Derive the status dot colour and the badge from **one shared tone helper**. Two independent
+  mappings drift and a healthy `anchored` row renders amber/red, which reads as a failure.
+- Once anchored, demote the write action to secondary (`Re-anchor`, outline) and promote the
+  verification action to primary. The next useful click is verification, not another submit.
+
+### 5. Mobile-first rows for long-running blockchain operations
+
+- Single column on mobile: **metadata first**, then full-width equal-width action buttons in a
+  2-up grid. Side-by-side buttons squeeze tx hashes and block numbers into hard-wrapped noise.
+- Step timelines and log tails span the **full card width** — do not nest them inside the metadata
+  column.
+- `truncate` record/bundle titles in queue lists so a long clinical title cannot stretch the layout.
+
+### New failure modes
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `npm error code ETARGET` / `notarget No matching version found for @midnight-ntwrk/ledger-v9@^0.1.0-alpha.1` | `compact-js@2.5.3` depends on an unpublished transitive alpha | Pin `compact-js@2.5.1`; pin every Midnight package exactly |
+| Toolchain install fails identically on every retry | Stale `package-lock.json` / `node_modules` from the half-finished attempt cached on the volume | Clear them in bootstrap; expose a "Clear toolchain" action that keeps the volume |
+| Install stalls mid-step with no error, then `status=1` | Runner machine OOM-killed (empty log tail) | 4 vCPU / 4 GB, sequential install groups, npm cache on volume, 30 s heartbeats, surface Fly machine events + exit code |
+| Detached job "failed" with nothing to debug | Error only shown as a toast | Persist failed job state + log tail, auto-expand, add copy-log |
+| Step timeline jumps backwards during a job | UI recomputes step from the newest matching log line | Make step derivation monotonic — only advance |
+| Anchored row shows an amber/red dot and looks broken | Dot and badge computed from separate status maps | One shared tone helper feeding both |
+| UI claims "verified" right after submitting | Verification inferred from your own DB write | Only `verified` after a read-only ledger membership check; otherwise "not re-checked" |
+
+### Anti-patterns (add to the main list)
+
+- Installing Midnight packages on the runner with `@latest` or caret ranges — one unpublished
+  transitive alpha breaks every deploy.
+- Retrying a failed toolchain install without clearing the stale lockfile / `node_modules`.
+- Running the SDK install as one giant `npm i` on a small machine and reading the resulting silence
+  as a hang.
+- Showing a detached job's only error in a toast.
+- Deriving status colour in two places.
+- Calling a submitted transaction "verified".
