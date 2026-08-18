@@ -68,23 +68,36 @@ function Dashboard() {
       />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {stats.map(({ label, value, icon: Icon, to }) => (
-          <Link key={label} to={to} className="panel p-3 transition-colors hover:border-primary/50 sm:p-4">
-            <div className="flex items-start justify-between gap-2">
-              <span className="min-w-0 text-xs text-muted-foreground">{label}</span>
-              <Icon className="h-4 w-4 shrink-0 text-primary" />
-            </div>
-            <p className="mt-2 font-display text-2xl font-semibold">{value}</p>
-          </Link>
+        {stats.map(({ label, value, icon: Icon, to }, i) => (
+          <Reveal key={label} delay={i * 70}>
+            <Link
+              to={to}
+              className="panel hover-lift group relative block overflow-hidden p-4 sm:p-5"
+            >
+              <span className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-primary/8 blur-xl transition-opacity duration-300 group-hover:opacity-100 sm:opacity-70" />
+              <div className="relative flex items-start justify-between gap-2">
+                <span className="min-w-0 text-xs font-medium text-muted-foreground">{label}</span>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary transition-transform duration-300 group-hover:scale-110">
+                  <Icon className="h-4 w-4" />
+                </span>
+              </div>
+              <p className="relative mt-3 font-display text-3xl font-bold tracking-tight tabular-nums">
+                <CountValue value={value} />
+              </p>
+            </Link>
+          </Reveal>
         ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Recent summaries" subtitle="Latest IPS bundles in this workspace">
+        <Panel accent title="Recent summaries" subtitle="Latest IPS bundles in this workspace">
           {data?.bundles.length ? (
             <ul className="space-y-2">
               {data.bundles.map((b) => (
-                <li key={b.id} className="rounded-md border border-border bg-card/40 px-3 py-2">
+                <li
+                  key={b.id}
+                  className="rounded-xl border border-border bg-card/60 px-3 py-2.5 transition-colors hover:border-primary/40"
+                >
                   <p className="truncate text-sm font-medium">{b.title}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     <span className="truncate">{b.patient_name ?? "Unnamed patient"}</span>
@@ -94,27 +107,40 @@ function Dashboard() {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              No summaries yet. Start from a sample bundle in the Summaries workspace.
-            </p>
+            <EmptyState
+              icon={<FileHeart className="h-6 w-6" />}
+              title="No summaries yet"
+              body="Start from a sample bundle in the Summaries workspace."
+              action={
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/app/ips">Open Summaries</Link>
+                </Button>
+              }
+            />
           )}
         </Panel>
 
         <Panel title="Recent activity" subtitle="Audit trail of workspace events">
           {data?.activity.length ? (
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {data.activity.map((a) => (
-                <li key={a.id} className="flex items-start gap-2 text-sm">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                <li key={a.id} className="relative flex items-start gap-3 text-sm">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary shadow-[0_0_0_3px_var(--hairline)]" />
                   <span className="min-w-0">
                     <span className="block truncate">{a.summary}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{a.kind}</span>
+                    <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                      {a.kind}
+                    </span>
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">Activity appears here as you build and anchor summaries.</p>
+            <EmptyState
+              icon={<Activity className="h-6 w-6" />}
+              title="Nothing logged yet"
+              body="Activity appears here as you build and anchor summaries."
+            />
           )}
         </Panel>
       </div>
