@@ -1,3 +1,6 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
+
 /**
  * Fly app names are global across the whole platform, but the console lets a
  * user pick the prefix. Without a cross-tenant check, provisioning (or
@@ -38,15 +41,7 @@ export async function assertPrefixNotOwnedByOthers(userId: string, appPrefix: st
  * therefore must never run against infrastructure the caller does not own.
  */
 export async function assertPrefixOwnedByCaller(
-  supabase: {
-    from: (table: string) => {
-      select: (cols: string) => {
-        eq: (col: string, value: string) => {
-          eq: (col: string, value: string) => { limit: (n: number) => PromiseLike<{ data: unknown[] | null }> };
-        };
-      };
-    };
-  },
+  supabase: SupabaseClient<Database>,
   userId: string,
   appPrefix: string,
 ) {
