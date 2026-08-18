@@ -596,3 +596,59 @@ else echo "${label}=probe-unavailable-in-this-image"; fi`;
     machines: machines.map((m) => ({ name: m.name, state: m.state, ...exitSummary(m) })),
   };
 }
+
+/* ------------------------------------------------------------------ runner --
+
+   Helpers used by runner.server.ts. They live here because the Machines API
+   client (`fly`, `flyOptional`, the auth token) is module-private.
+   ------------------------------------------------------------------------- */
+
+/** Looks up a machine by name. `null` means the machine does not exist. */
+export async function findMachineByName(
+  appName: string,
+  name: string,
+): Promise<{ id: string; state: string } | null> {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const m = machines.find((x) => x.name === name);
+  return m ? { id: m.id, state: m.state } : null;
+}
+
+/** Creates or re-applies the runner machine and waits for it to be startable. */
+export async function ensureRunnerMachine(appName: string, region: string) {
+  const m = await ensureMachine(appName, "runner", region);
+  await flyOptional(`/apps/${appName}/machines/${m.id}/wait?state=started&timeout=60`);
+  const current = await findMachineByName(appName, RUNNER.machine);
+  return current ?? { id: m.id, state: m.state ?? "created" };
+}
+
+/** A stopped runner cannot be exec'd into; start it before running a job. */
+export async function startMachine(appName: string, machineId: string) {
+  await flyOptional(`/apps/${appName}/machines/${machineId}/start`, { method: "POST" });
+  await flyOptional(`/apps/${appName}/machines/${machineId}/wait?state=started&timeout=60`);
+}
+
+export type ExecResult = { exitCode: number | null; output: string };
+
+/**
+ * Runs a shell command inside a machine. Fly caps exec at ~30s, so every
+ * long-running job is launched detached and polled instead of awaited.
+ */
+export async function execOnMachine(
+  appName: string,
+  machineId: string,
+  command: string,
+  timeoutSec = 25,
+): Promise<ExecResult> {
+  const res = await fly<{ exit_code?: number; stdout?: string; stderr?: string }>(
+    `/apps/${appName}/machines/${machineId}/exec`,
+    {
+      method: "POST",
+      body: JSON.stringify({ command: ["/bin/sh", "-c", command], timeout: timeoutSec }),
+      timeoutMs: (timeoutSec + 10) * 1000,
+    },
+  );
+  return {
+    exitCode: typeof res.exit_code === "number" ? res.exit_code : null,
+    output: `${res.stdout ?? ""}${res.stderr ?? ""}`,
+  };
+}
