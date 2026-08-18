@@ -12,7 +12,7 @@
  *     --proof   https://<app>.fly.dev:6300 \
  *     --node    wss://<app>.fly.dev:9944
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import WebSocket from "ws";
@@ -54,6 +54,17 @@ const CONTRACT_ADDRESS = args.address ?? deployInfo.address;
 if (!CONTRACT_ADDRESS || /^0+$/.test(CONTRACT_ADDRESS)) {
   console.error("No deployed contract address — run scripts/deploy-midnight.mjs first.");
   process.exit(1);
+}
+
+// `--out` makes the run machine-readable for the console's runner poller.
+const RESULT_FILE = args.out ? resolve(args.out) : null;
+function writeResult(payload) {
+  if (!RESULT_FILE) return;
+  try {
+    writeFileSync(RESULT_FILE, `${JSON.stringify(payload)}\n`);
+  } catch (err) {
+    console.error("could not write result file:", err);
+  }
 }
 
 async function main() {
@@ -145,11 +156,13 @@ async function main() {
   const txId = called.public?.txId ?? called.txId ?? null;
   const blockHeight = called.public?.blockHeight ?? null;
 
+  writeResult({ ok: true, txId, blockHeight, commitment: COMMITMENT });
   console.log(`ANCHOR_OK tx=${txId} block=${blockHeight}`);
   await wallet.close?.();
 }
 
 main().catch((err) => {
   console.error(err);
+  writeResult({ ok: false, error: String(err?.message ?? err).slice(0, 800) });
   process.exit(1);
 });

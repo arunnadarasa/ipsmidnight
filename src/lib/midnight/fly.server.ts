@@ -1,9 +1,11 @@
-import { IMAGES, INDEXER_ENV, nodeRpcWsUrl, stackUrls, type StackUrls } from "./shared";
+import { IMAGES, INDEXER_ENV, nodeRpcWsUrl, RUNNER, stackUrls, type StackUrls } from "./shared";
 
 const MACHINES_API = "https://api.machines.dev/v1";
 
 const NODE_VOLUME = "midnight_chain";
 const NODE_DATA_PATH = "/node/chain";
+
+export type MachineKind = "node" | "indexer" | "proof" | "runner";
 
 type FlyExitEvent = { exit_code?: number | null; oom_killed?: boolean | null };
 type FlyMachineEvent = {
@@ -123,10 +125,29 @@ export async function appIpSummary(appName: string): Promise<string> {
 
 
 function machineConfig(
-  kind: "node" | "indexer" | "proof",
+  kind: MachineKind,
   appName: string,
   volumeId?: string | null,
 ) {
+  if (kind === "runner") {
+    return {
+      name: RUNNER.machine,
+      region: undefined,
+      config: {
+        image: IMAGES.runner,
+        // Idles until a job is exec'd into it. No published services: the
+        // runner only ever dials out to the indexer and the proof server.
+        init: { cmd: ["sleep", "infinity"] },
+        guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // The volume carries node_modules, the compiled contract and the
+        // LevelDB private state, so a restart never re-bootstraps or loses the
+        // private state a deployed contract was created with.
+        ...(volumeId ? { mounts: [{ volume: volumeId, path: RUNNER.work }] } : {}),
+        restart: { policy: "always" },
+      },
+    };
+  }
+
   if (kind === "node") {
     return {
       name: "midnight-node",
@@ -231,19 +252,24 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
 }
 
 /**
- * Reuses an existing chain volume in the region or creates one. Returns null on
- * failure so a missing volume degrades to ephemeral chain data rather than
- * blocking the whole provision.
+ * Reuses an existing volume in the region or creates one. Returns null on
+ * failure so a missing volume degrades to ephemeral data rather than blocking
+ * the whole provision.
  */
-async function ensureNodeVolume(appName: string, region: string): Promise<string | null> {
+async function ensureVolume(
+  appName: string,
+  region: string,
+  name: string,
+  sizeGb: number,
+): Promise<string | null> {
   try {
     const volumes =
       (await flyOptional<{ id: string; name: string; region: string }[]>(`/apps/${appName}/volumes`)) ?? [];
-    const existing = volumes.find((v) => v.name === NODE_VOLUME && v.region === region);
+    const existing = volumes.find((v) => v.name === name && v.region === region);
     if (existing) return existing.id;
     const created = await fly<{ id: string }>(`/apps/${appName}/volumes`, {
       method: "POST",
-      body: JSON.stringify({ name: NODE_VOLUME, region, size_gb: 10 }),
+      body: JSON.stringify({ name, region, size_gb: sizeGb }),
     });
     return created.id;
   } catch {
@@ -251,13 +277,20 @@ async function ensureNodeVolume(appName: string, region: string): Promise<string
   }
 }
 
+/** Chain data for the node, SDK + private state for the runner. */
+function volumeFor(appName: string, region: string, kind: MachineKind) {
+  if (kind === "node") return ensureVolume(appName, region, NODE_VOLUME, 10);
+  if (kind === "runner") return ensureVolume(appName, region, RUNNER.volume, 5);
+  return Promise.resolve(null);
+}
+
 async function ensureMachine(
   appName: string,
-  kind: "node" | "indexer" | "proof",
+  kind: MachineKind,
   region: string,
 ): Promise<FlyMachine> {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
-  const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
+  const volumeId = await volumeFor(appName, region, kind);
   const spec = machineConfig(kind, appName, volumeId);
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -278,8 +311,9 @@ export async function repairMidnightStack(appName: string, region: string) {
 
   // Node and proof first, indexer LAST: the indexer only retries its node
   // connection on boot, so it must start against an already-listening RPC.
-  for (const kind of ["node", "proof", "indexer"] as const) {
-    const volumeId = kind === "node" ? await ensureNodeVolume(appName, region) : null;
+  // The runner is last — it only ever dials the others.
+  for (const kind of ["node", "proof", "indexer", "runner"] as const) {
+    const volumeId = await volumeFor(appName, region, kind);
     const spec = machineConfig(kind, appName, volumeId);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     const existing = machines.find((m) => m.name === spec.name);
@@ -314,7 +348,7 @@ export async function provisionStack(input: {
   await allocateIps(appName);
 
   const machines: { name: string; id: string; state: string }[] = [];
-  for (const kind of ["node", "indexer", "proof"] as const) {
+  for (const kind of ["node", "indexer", "proof", "runner"] as const) {
     const m = await ensureMachine(appName, kind, input.region);
     machines.push({ name: m.name ?? kind, id: m.id, state: m.state ?? "created" });
   }
@@ -560,5 +594,61 @@ else echo "${label}=probe-unavailable-in-this-image"; fi`;
       ? await exec(indexer.id, reach("edge", `https://${edgeHost}:9944/health`, `${edgeHost} 9944`))
       : null,
     machines: machines.map((m) => ({ name: m.name, state: m.state, ...exitSummary(m) })),
+  };
+}
+
+/* ------------------------------------------------------------------ runner --
+
+   Helpers used by runner.server.ts. They live here because the Machines API
+   client (`fly`, `flyOptional`, the auth token) is module-private.
+   ------------------------------------------------------------------------- */
+
+/** Looks up a machine by name. `null` means the machine does not exist. */
+export async function findMachineByName(
+  appName: string,
+  name: string,
+): Promise<{ id: string; state: string } | null> {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const m = machines.find((x) => x.name === name);
+  return m ? { id: m.id, state: m.state } : null;
+}
+
+/** Creates or re-applies the runner machine and waits for it to be startable. */
+export async function ensureRunnerMachine(appName: string, region: string) {
+  const m = await ensureMachine(appName, "runner", region);
+  await flyOptional(`/apps/${appName}/machines/${m.id}/wait?state=started&timeout=60`);
+  const current = await findMachineByName(appName, RUNNER.machine);
+  return current ?? { id: m.id, state: m.state ?? "created" };
+}
+
+/** A stopped runner cannot be exec'd into; start it before running a job. */
+export async function startMachine(appName: string, machineId: string) {
+  await flyOptional(`/apps/${appName}/machines/${machineId}/start`, { method: "POST" });
+  await flyOptional(`/apps/${appName}/machines/${machineId}/wait?state=started&timeout=60`);
+}
+
+export type ExecResult = { exitCode: number | null; output: string };
+
+/**
+ * Runs a shell command inside a machine. Fly caps exec at ~30s, so every
+ * long-running job is launched detached and polled instead of awaited.
+ */
+export async function execOnMachine(
+  appName: string,
+  machineId: string,
+  command: string,
+  timeoutSec = 25,
+): Promise<ExecResult> {
+  const res = await fly<{ exit_code?: number; stdout?: string; stderr?: string }>(
+    `/apps/${appName}/machines/${machineId}/exec`,
+    {
+      method: "POST",
+      body: JSON.stringify({ command: ["/bin/sh", "-c", command], timeout: timeoutSec }),
+      timeoutMs: (timeoutSec + 10) * 1000,
+    },
+  );
+  return {
+    exitCode: typeof res.exit_code === "number" ? res.exit_code : null,
+    output: `${res.stdout ?? ""}${res.stderr ?? ""}`,
   };
 }

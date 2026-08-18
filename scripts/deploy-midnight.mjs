@@ -53,6 +53,17 @@ const DEPLOYER_SECRET_HEX = "11".repeat(32);
 const PROJECT = resolve(args.project ?? process.cwd());
 const CONTRACT_DIR = resolve(PROJECT, "contracts/managed/ips-anchor-registry");
 const OUT_FILE = resolve(PROJECT, "src/data/midnight-contract.undeployed.json");
+// `--out` makes the run machine-readable: the console's runner polls this file
+// to learn whether the job succeeded, instead of scraping stdout.
+const RESULT_FILE = args.out ? resolve(args.out) : null;
+function writeResult(payload) {
+  if (!RESULT_FILE) return;
+  try {
+    writeFileSync(RESULT_FILE, `${JSON.stringify(payload)}\n`);
+  } catch (err) {
+    console.error("could not write result file:", err);
+  }
+}
 if (!existsSync(`${CONTRACT_DIR}/contract/index.js`) && !existsSync(`${CONTRACT_DIR}/contract/index.cjs`)) {
   console.error(`Compile first: compact compile contracts/IpsAnchorRegistry.compact ${CONTRACT_DIR}`);
   process.exit(1);
@@ -178,11 +189,13 @@ async function main() {
     )}\n`,
   );
 
+  writeResult({ ok: true, address, deployTx });
   console.log(`DEPLOY_OK address=${address} tx=${deployTx}`);
   await wallet.close?.();
 }
 
 main().catch((err) => {
   console.error(err);
+  writeResult({ ok: false, error: String(err?.message ?? err).slice(0, 800) });
   process.exit(1);
 });

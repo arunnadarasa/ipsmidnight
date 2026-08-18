@@ -21,6 +21,7 @@ import {
 import { FLY_REGIONS } from "@/lib/midnight/shared";
 import { checkFlyStack, destroyFlyStack, provisionFlyStack, verifyAnchor } from "@/lib/midnight/fly.functions";
 import contractInfo from "@/data/midnight-contract.undeployed.json";
+import { ContractLifecycle, useAnchorSubmission } from "@/components/deploy/ContractLifecycle";
 import { ipsCommitment, randomSaltHex } from "@/lib/ips/digest";
 
 const PLACEHOLDER_ADDRESS = "0".repeat(64);
@@ -156,13 +157,13 @@ function MidnightConsole() {
       return commitment;
     },
     onSuccess: () => {
-      toast.success("Anchor queued — submit it with the deploy script, then verify.");
+      toast.success("Anchor queued — press Submit to prove and write it on-chain.");
       void qc.invalidateQueries({ queryKey: ["anchors"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const deployed = contractInfo.address !== PLACEHOLDER_ADDRESS;
+  const anchorSubmission = useAnchorSubmission(deployment?.app_prefix);
 
   return (
     <div className="space-y-8">
@@ -305,29 +306,11 @@ function MidnightConsole() {
           )}
         </Panel>
 
-        <Panel title="Anchor contract" subtitle={`Compact ${contractInfo.compactVersion} · ${contractInfo.circuit}`}>
-          {deployed ? (
-            <div className="space-y-3 text-sm">
-              <TruncatedMono value={contractInfo.address} label="contract" head={14} tail={8} />
-              <TruncatedMono value={contractInfo.deployTx} label="deploy tx" head={14} tail={8} />
-              <p className="text-xs text-muted-foreground">
-                Anchors call <code className="font-mono">{contractInfo.circuit}</code> with the commitment only.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3 text-sm text-muted-foreground">
-              <p>
-                The Compact contract is written and compiled, but not yet deployed. Deployment runs once the
-                Fly stack reports ready, using the proof server on port 6300 and the indexer over HTTPS.
-              </p>
-              <pre className="overflow-x-auto rounded-md bg-secondary/60 p-3 font-mono text-xs">
-{`bun scripts/deploy-midnight.mjs \\
-  --indexer <indexer-url> \\
-  --proof <proof-url>`}
-              </pre>
-            </div>
-          )}
-        </Panel>
+        <ContractLifecycle
+          appPrefix={deployment?.app_prefix}
+          region={deployment?.region ?? region}
+          stackReady={Boolean(health.data?.ready)}
+        />
       </div>
 
       <Panel title="Anchors" subtitle="Commitments queued and confirmed on the Undeployed ledger">
@@ -373,6 +356,20 @@ function MidnightConsole() {
                     {a.last_error ? <p className="text-xs text-warning">{a.last_error}</p> : null}
                   </div>
                   <div className="flex shrink-0 flex-col gap-1">
+                    <Button
+                      size="sm"
+                      onClick={() => anchorSubmission.submit.mutate(a.id)}
+                      disabled={
+                        anchorSubmission.submit.isPending || anchorSubmission.activeAnchorId !== null
+                      }
+                    >
+                      {anchorSubmission.activeAnchorId === a.id ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Rocket className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Submit
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => doVerify.mutate(a.id)} disabled={doVerify.isPending}>
                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Verify
                     </Button>
