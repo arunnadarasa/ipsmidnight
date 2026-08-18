@@ -140,15 +140,17 @@ Tables (Lovable Cloud / Postgres):
 | `ips_bundles` | Saved summaries, their digest and validation status |
 | `sample_bundles` | Shipped demo bundles, readable by all signed-in users |
 | `credential_records` | Issued credentials linked to a bundle |
-| `midnight_anchors` | Commitments, transaction references, contract address |
+| `midnight_anchors` | Commitments, the **salt** the commitment was derived from, transaction references, contract address |
 | `activity_log` | Audit events |
 
 Security posture:
 
 - **RLS on every table**, with per-user `auth.uid()` policies, plus explicit `GRANT`s for `authenticated` and `service_role` in the same migration as each `CREATE TABLE` (PostgREST grants nothing by default — RLS alone leaves the table unreachable).
 - **Privilege escalation avoided by design**: roles are a separate table read via a security-definer function, never a boolean on a user-owned row.
-- **Clinical content stays server-side.** Bundles are written and read through RLS-scoped queries; what circulates in credentials and on-chain is only the digest.
+- **Data minimisation in credentials.** A credential carries the `summaryDigest`, the credential type, and — only when the summary has a birth date — a derived `over18` boolean. No patient name, no summary title, no raw date of birth, no clinical content.
+- **Commitments are recomputable.** `commitment = H("ips:anchor:v1" ‖ digest ‖ salt)` and the salt is persisted with the anchor. Without the salt an anchor is unverifiable, so anchors missing one fail closed instead of reading as confirmed.
 - **Secrets never reach the browser.** The Fly API token and the Identus admin key are read inside `.handler()` bodies of server functions. `*.server.ts` modules are excluded from client bundles by filename; the client only ever imports `*.functions.ts`.
+- **Key material is not committed.** The Midnight LevelDB private-state store, `.env` and packaged bundles are git-ignored. The dev-network genesis seed, deployer secret and private-state password in `scripts/*.mjs` are the well-known Undeployed test values and are overridable via `MIDNIGHT_GENESIS_SEED`, `MIDNIGHT_DEPLOYER_SECRET_HEX` and `MIDNIGHT_PRIVATE_STORAGE_PASSWORD`. They must not be reused on a real network.
 - **Google sign-in** is enabled alongside email; anonymous sign-ups are off.
 
 ---
