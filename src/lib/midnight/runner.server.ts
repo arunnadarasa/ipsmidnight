@@ -82,10 +82,16 @@ function jobScript(id: string, body: string) {
   const res = `${RUNNER.out}/${id}.json`;
   return `#!/bin/sh
 echo $$ > ${RUNNER.out}/${id}.pid
+echo "JOB_START $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# Heartbeat: without it a wedged job and a working job look identical in the log
+# tail, so the UI cannot tell "slow" from "dead".
+( while true; do sleep 30; echo "HEARTBEAT $(date -u '+%H:%M:%SZ')"; done ) &
+hb=$!
 ( set -e
 ${body}
 )
 status=$?
+kill $hb 2>/dev/null
 if [ ! -f ${res} ]; then
   if [ "$status" = "0" ]; then
     echo '{"ok":true}' > ${res}
