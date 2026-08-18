@@ -44,7 +44,9 @@ export const RUNNER = {
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider@4.1.1",
     "@midnight-ntwrk/midnight-js-network-id@4.1.1",
     "@midnight-ntwrk/midnight-js-utils@4.1.1",
-    "@midnight-ntwrk/compact-js@4.1.1",
+    // compact-js is versioned independently of midnight-js 4.x and is not a
+    // transitive dependency of midnight-js-contracts, so it needs its own pin.
+    "@midnight-ntwrk/compact-js@2.5.3",
     "@midnight-ntwrk/wallet-sdk@1.2.0",
     "@midnight-ntwrk/testkit-js@4.1.1",
     "@midnight-ntwrk/zswap@4.0.0",
