@@ -50,12 +50,13 @@ The app is a TanStack Start (React 19 + Vite) application. Everything privileged
               │  auth · RLS · summaries  │   │  provision / exec / destroy │
               │  credentials · anchors   │   └───┬────────────────────┬────┘
               └──────────────────────────┘       │                    │
-                                     ┌───────────▼─────────┐  ┌───────▼──────────────┐
-                                     │ Identus stack (Fly) │  │ Midnight stack (Fly) │
-                                     │ postgres:16-alpine  │  │ midnight-node 1.0.0  │
-                                     │ prism-node 2.5.0    │  │ indexer-standalone   │
-                                     │ cloud-agent 1.40.0  │  │ proof-server 8.1.0   │
-                                     └─────────────────────┘  └──────────────────────┘
+                                      ┌───────────▼─────────┐  ┌──────────▼──────────────┐
+                                      │ Identus stack (Fly) │  │ Midnight stack (Fly)    │
+                                      │ postgres:16-alpine  │  │ midnight-node 1.0.0     │
+                                      │ prism-node 2.5.0    │  │ indexer-standalone 4.3.3│
+                                      │ cloud-agent 1.40.0  │  │ proof-server 8.1.0      │
+                                      └─────────────────────┘  │ runner (node:22-slim)   │
+                                                               └─────────────────────────┘
 ```
 
 Machines inside a Fly app talk to each other over Fly's private **6PN** network (`<group>.process.<app>.internal`), which is **IPv6-only** — a detail that caused most of the early boot failures (see [Issues](#issues-encountered-and-how-they-were-solved)).
@@ -65,15 +66,20 @@ Key modules:
 | Path | Role |
 | --- | --- |
 | `src/lib/ips/{types,builder,validate,digest}.ts` | IPS section specs, form-state → FHIR bundle builder, structural validator, canonical SHA-256 digest |
-| `src/lib/midnight/shared.ts` | Pinned Midnight images, indexer env contract, 6PN + public URL helpers, `ips:anchor:v1` domain separator |
-| `src/lib/midnight/fly.server.ts` | Fly Machines client for the node / indexer / proof-server stack |
+| `src/lib/midnight/shared.ts` | Pinned Midnight images, runner SDK pins, indexer env contract, 6PN + public URL helpers, `ips:anchor:v1` domain separator |
+| `src/lib/midnight/fly.server.ts` | Fly Machines client for the node / indexer / proof-server / runner stack |
+| `src/lib/midnight/runner.server.ts` | The runner machine: launches, polls and reads results for deploy / anchor / verify jobs over Fly `exec` |
+| `src/lib/runner-steps.ts` | Maps a runner job (kind + log tail + result) onto the same step-timeline model as the Deploy page |
 | `src/lib/identus/fly-shared.ts` | Identus images, four-database layout, Postgres init SQL, JVM IPv6 flags, agent boot-log wrapper |
 | `src/lib/identus/{fly,cloud-agent}.server.ts` | Provisioning, health probes, log tailing, DID publication, connectionless issuance |
 | `src/lib/stack.functions.ts` | Unified `provision / check / repair / repairIdentusOnly / destroy / list` server functions |
 | `src/lib/stack-steps.ts` | Derives an ordered, human-readable step list from raw machine states + health probes |
 | `src/components/deploy/StackTimeline.tsx` | Progressive deployment timeline UI with live boot timers and error extraction |
+| `src/components/deploy/ContractLifecycle.tsx` | In-app contract lifecycle panel: prepare runner, deploy contract, clear toolchain, per-row anchor/verify with step timeline + copy-log |
 | `contracts/IpsAnchorRegistry.compact` | The anchoring contract; compiled artifacts under `contracts/managed`, ZK keys under `public/keys` and `public/zkir` |
 | `scripts/deploy-midnight.mjs` | Deploys the compiled contract against a provisioned Fly stack |
+| `scripts/anchor-midnight.mjs` | Submits a commitment to the deployed contract and writes the tx reference |
+| `scripts/verify-midnight.mjs` | Read-only ledger membership check — queries the indexer and calls the contract's `ledger()` view |
 
 ---
 
