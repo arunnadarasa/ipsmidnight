@@ -15,6 +15,9 @@ export const provisionIdentusAgent = createServerFn({ method: "POST" })
     const { provisionIdentusStack } = await import("./fly.server");
     const { supabase, userId } = context;
 
+    const { assertPrefixNotOwnedByOthers } = await import("@/lib/stack-ownership.server");
+    await assertPrefixNotOwnedByOthers(userId, data.appPrefix);
+
     let result;
     try {
       result = await provisionIdentusStack({ appPrefix: data.appPrefix, region: data.region, ...(data.orgSlug ? { orgSlug: data.orgSlug } : {}) });

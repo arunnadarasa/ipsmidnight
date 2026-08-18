@@ -28,6 +28,9 @@ export const provisionFullStack = createServerFn({ method: "POST" })
     const { provisionStack } = await import("@/lib/midnight/fly.server");
     const { supabase, userId } = context;
 
+    const { assertPrefixNotOwnedByOthers } = await import("@/lib/stack-ownership.server");
+    await assertPrefixNotOwnedByOthers(userId, data.appPrefix);
+
     const label = data.label?.trim() ? data.label.trim() : undefined;
 
     // --- Identus half ---
@@ -116,6 +119,9 @@ export const provisionHalf = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+
+    const { assertPrefixNotOwnedByOthers } = await import("@/lib/stack-ownership.server");
+    await assertPrefixNotOwnedByOthers(userId, data.appPrefix);
 
     if (data.kind === "identus") {
       const { provisionIdentusStack, recordIdentusDeployment } = await import("@/lib/identus/fly.server");
@@ -420,6 +426,14 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { repairIdentusStack } = await import("@/lib/identus/fly.server");
     const { supabase, userId } = context;
+
+    // Adoption mints a fresh admin key onto running machines: the caller must
+    // already own this prefix, and it must not belong to another tenant.
+    const { assertPrefixNotOwnedByOthers, assertPrefixOwnedByCaller } = await import(
+      "@/lib/stack-ownership.server"
+    );
+    await assertPrefixNotOwnedByOthers(userId, data.appPrefix);
+    await assertPrefixOwnedByCaller(supabase, userId, data.appPrefix);
 
     const { data: rows } = await supabase
       .from("fly_deployments")

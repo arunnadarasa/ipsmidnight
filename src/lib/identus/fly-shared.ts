@@ -13,7 +13,6 @@ export const IDENTUS_IMAGES = {
 
 export const IDENTUS_DB = {
   user: "postgres",
-  password: "postgres",
   databases: ["pollux", "connect", "agent", "node"] as const,
 } as const;
 
@@ -27,21 +26,23 @@ export const IDENTUS_DB = {
  * The grant must be applied inside each database, hence the `\connect` hops.
  * Runs only while the Postgres data directory is empty.
  */
-export const POSTGRES_INIT_SQL = [
-  ...IDENTUS_DB.databases.map(
-    (db) => `DO $$ BEGIN
+export function postgresInitSql(appRolePassword: string) {
+  return [
+    ...IDENTUS_DB.databases.map(
+      (db) => `DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${db}-application-user') THEN
-    CREATE ROLE "${db}-application-user" LOGIN PASSWORD 'password';
+    CREATE ROLE "${db}-application-user" LOGIN PASSWORD '${appRolePassword}';
   END IF;
 END $$;`,
-  ),
-  ...IDENTUS_DB.databases.map((db) => `CREATE DATABASE ${db};`),
-  ...IDENTUS_DB.databases.flatMap((db) => [
-    `\\connect ${db}`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${db}-application-user";`,
-    `GRANT USAGE, CREATE ON SCHEMA public TO "${db}-application-user";`,
-  ]),
-].join("\n");
+    ),
+    ...IDENTUS_DB.databases.map((db) => `CREATE DATABASE ${db};`),
+    ...IDENTUS_DB.databases.flatMap((db) => [
+      `\\connect ${db}`,
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${db}-application-user";`,
+      `GRANT USAGE, CREATE ON SCHEMA public TO "${db}-application-user";`,
+    ]),
+  ].join("\n");
+}
 
 
 /** The JVM must prefer IPv6 — Fly's private network is 6PN only. */

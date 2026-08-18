@@ -12,6 +12,8 @@ export const provisionFlyStack = createServerFn({ method: "POST" })
   })
   .handler(async ({ data, context }) => {
     const { provisionStack } = await import("./fly.server");
+    const { assertPrefixNotOwnedByOthers } = await import("@/lib/stack-ownership.server");
+    await assertPrefixNotOwnedByOthers(context.userId, data.appPrefix);
     const { supabase, userId } = context;
 
     let result;
