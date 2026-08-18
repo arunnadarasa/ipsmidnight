@@ -3,6 +3,7 @@
  * result) onto the same ordered step model the Deploy page timeline renders.
  * Nothing here calls the backend: the poller already returns everything below.
  */
+import { RUNNER } from "@/lib/midnight/shared";
 import type { StackStep, StepState } from "@/lib/stack-steps";
 
 export type RunnerJobView = {
@@ -66,14 +67,17 @@ function resolve(specs: Spec[], job: RunnerJobView, finalDone: boolean): StackSt
 const BOOTSTRAP: Spec[] = [
   { key: "fetch", label: "Fetching the contract bundle", done: /STEP:staged|BOOTSTRAP_OK/ },
   { key: "staged", label: "Compact artifacts staged", done: /STEP:deps|BOOTSTRAP_OK/ },
-  {
-    key: "deps",
-    label: "Installing the Midnight SDK",
-    hint: "first install takes a few minutes",
-    done: /BOOTSTRAP_OK/,
-  },
+  // One step per install group: the SDK is installed in groups to keep the
+  // memory peak down, and this is what makes the long phase visibly advance.
+  ...RUNNER.depGroups.map((_group, i) => ({
+    key: `deps-${i + 1}`,
+    label: `Installing the Midnight SDK (${i + 1} of ${RUNNER.depGroups.length})`,
+    ...(i === 0 ? { hint: "the first install takes a few minutes" } : {}),
+    done: new RegExp(`STEP:deps:${i + 1}\\b|BOOTSTRAP_OK`),
+  })),
   { key: "ready", label: "Toolchain ready" },
 ];
+
 
 const DEPLOY: Spec[] = [
   {

@@ -19,6 +19,7 @@ import {
   execOnMachine,
   findMachineByName,
   flyConfigured,
+  machineEventSummary,
   startMachine,
 } from "./fly.server";
 
@@ -82,10 +83,16 @@ function jobScript(id: string, body: string) {
   const res = `${RUNNER.out}/${id}.json`;
   return `#!/bin/sh
 echo $$ > ${RUNNER.out}/${id}.pid
+echo "JOB_START $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# Heartbeat: without it a wedged job and a working job look identical in the log
+# tail, so the UI cannot tell "slow" from "dead".
+( while true; do sleep 30; echo "HEARTBEAT $(date -u '+%H:%M:%SZ')"; done ) &
+hb=$!
 ( set -e
 ${body}
 )
 status=$?
+kill $hb 2>/dev/null
 if [ ! -f ${res} ]; then
   if [ "$status" = "0" ]; then
     echo '{"ok":true}' > ${res}
@@ -155,6 +162,22 @@ export async function readJob(appName: string, machineId: string, id: string): P
       result = { ok: false, error: `Unreadable result file: ${resultRaw.slice(0, 200)}` };
     }
   }
+
+  // A job whose wrapper is gone without a result file did not finish — it was
+  // killed (an OOM kill takes the whole machine down and `restart: always`
+  // brings it back clean). Reporting that as "still running" is what made the
+  // install look like an endless spinner, so name it instead.
+  if (!result && !alive && /JOB_START/.test(log)) {
+    const events = await machineEventSummary(appName, machineId);
+    result = {
+      ok: false,
+      error:
+        "The runner stopped before the job finished — most likely it ran out of memory and restarted." +
+        (events ? ` Recent machine events: ${events}.` : "") +
+        " Press the button again to retry; work already on the volume is reused.",
+    };
+  }
+
   return { id, kind: jobKind(id), running: alive && !result, log, result };
 }
 
@@ -209,18 +232,29 @@ export async function prepareRunner(input: {
   if (machine.state !== "started") await startMachine(appName, machine.id);
 
   const id = newJobId("bootstrap");
+  const npm = `npm install --no-audit --no-fund --loglevel=error --prefer-offline --cache ${RUNNER.work}/npm-cache`;
   const body = [
     `echo "installing the Midnight toolchain (this takes a few minutes)"`,
     // The slim Node image usually ships curl; install it only if it is missing.
     `command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }`,
     `curl -fsSL "${input.bundleUrl}" -o ${RUNNER.work}/bundle.tgz`,
-    `rm -rf ${RUNNER.app} && mkdir -p ${RUNNER.app}`,
+    // Extracted over the top rather than after `rm -rf`: the bundle only
+    // carries scripts and contract artifacts, so keeping node_modules in place
+    // makes a retry after a restart reuse everything already installed.
+    `mkdir -p ${RUNNER.app} ${RUNNER.work}/npm-cache`,
     `tar xzf ${RUNNER.work}/bundle.tgz -C ${RUNNER.app}`,
     // Plain progress markers so the UI can show a step timeline instead of a log wall.
     `echo STEP:staged`,
     `cd ${RUNNER.app}`,
+    // Cap the heap so npm reports a failure instead of being killed silently by
+    // the kernel, and install in groups to keep the memory peak down.
+    `export NODE_OPTIONS=--max-old-space-size=3072`,
     `echo STEP:deps`,
-    `npm install --no-audit --no-fund --loglevel=error ${RUNNER.deps.join(" ")}`,
+    ...RUNNER.depGroups.flatMap((group, i) => [
+      `echo "installing group ${i + 1} of ${RUNNER.depGroups.length}"`,
+      `${npm} ${group.join(" ")}`,
+      `echo STEP:deps:${i + 1}`,
+    ]),
     `printf %s ${RUNNER.artifactVersion} > ${RUNNER.work}/.ready`,
     `echo BOOTSTRAP_OK`,
   ].join("\n");

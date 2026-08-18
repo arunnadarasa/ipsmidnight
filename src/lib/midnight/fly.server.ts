@@ -138,7 +138,10 @@ function machineConfig(
         // Idles until a job is exec'd into it. No published services: the
         // runner only ever dials out to the indexer and the proof server.
         init: { cmd: ["sleep", "infinity"] },
-        guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+        // 2 GB was not enough: npm unpacking the WASM-heavy SDK was OOM-killed
+        // a few minutes in, which restarted the machine and left the install
+        // with no error to report.
+        guest: { cpu_kind: "shared", cpus: 4, memory_mb: 4096 },
         // The volume carries node_modules, the compiled contract and the
         // LevelDB private state, so a restart never re-bootstraps or loses the
         // private state a deployed contract was created with.
@@ -280,7 +283,9 @@ async function ensureVolume(
 /** Chain data for the node, SDK + private state for the runner. */
 function volumeFor(appName: string, region: string, kind: MachineKind) {
   if (kind === "node") return ensureVolume(appName, region, NODE_VOLUME, 10);
-  if (kind === "runner") return ensureVolume(appName, region, RUNNER.volume, 5);
+  // 10 GB: node_modules for the SDK plus the npm cache (kept on the volume so a
+  // retry after a restart is mostly a cache read) does not fit in 5 GB.
+  if (kind === "runner") return ensureVolume(appName, region, RUNNER.volume, 10);
   return Promise.resolve(null);
 }
 
@@ -658,3 +663,32 @@ export async function execOnMachine(
     output: `${res.stdout ?? ""}${res.stderr ?? ""}`,
   };
 }
+
+/**
+ * Recent Fly lifecycle events for a machine, newest first, as one short line.
+ * This is how a silent death becomes explainable: an OOM kill or a restart
+ * shows up here even though the job itself never got to write a result.
+ */
+export async function machineEventSummary(
+  appName: string,
+  machineId: string,
+  limit = 4,
+): Promise<string> {
+  try {
+    const m = await flyOptional<FlyMachine>(`/apps/${appName}/machines/${machineId}`);
+    const events = m?.events ?? [];
+    if (events.length === 0) return "";
+    return events
+      .slice(0, limit)
+      .map((e) => {
+        const exit = e.request?.exit_event;
+        const oom = exit?.oom_killed ? " out of memory" : "";
+        const code = typeof exit?.exit_code === "number" ? ` exit ${exit.exit_code}` : "";
+        return `${e.type ?? "event"}/${e.status ?? "?"}${code}${oom}`;
+      })
+      .join(" · ");
+  } catch {
+    return "";
+  }
+}
+
