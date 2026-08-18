@@ -293,6 +293,13 @@ export function ContractLifecycle({
             }
           />
 
+          {failure ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium text-destructive">The last runner job failed</p>
+              <p className="mt-1 text-muted-foreground">{failure}</p>
+            </div>
+          ) : null}
+
           {contract ? (
             <div className="space-y-2 text-sm">
               <Badge className="bg-success/15 text-success">deployed</Badge>
@@ -332,6 +339,22 @@ export function ContractLifecycle({
               )}
               {contract ? "Redeploy contract" : "Deploy contract"}
             </Button>
+            {s?.machine ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => reset.mutate()}
+                disabled={busy}
+                className="text-muted-foreground"
+              >
+                {reset.isPending ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Eraser className="mr-1.5 h-4 w-4" />
+                )}
+                Clear toolchain
+              </Button>
+            ) : null}
           </div>
 
           {!stackReady ? (
@@ -340,7 +363,8 @@ export function ContractLifecycle({
             </p>
           ) : null}
 
-          <LogTail log={j?.log ?? ""} />
+          <LogTail log={logText} defaultOpen={Boolean(failure)} />
+
         </div>
       )}
     </Panel>
