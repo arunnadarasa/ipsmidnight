@@ -13,15 +13,17 @@ import {
   getRunnerStatus,
   pollRunnerJob,
   prepareRunnerMachine,
+  verifyAnchorMembership,
 } from "@/lib/midnight/runner.functions";
 
 /**
- * Submitting an anchor is a per-row action in the anchors list, so the polling
- * for it lives in this hook rather than inside the panel below.
+ * Submitting and verifying an anchor are per-row actions in the anchors list, so
+ * the polling for both lives in this hook rather than inside the panel below.
  */
 export function useAnchorSubmission(appPrefix: string | null | undefined) {
   const qc = useQueryClient();
   const submitFn = useServerFn(anchorQueuedSummary);
+  const verifyFn = useServerFn(verifyAnchorMembership);
   const pollFn = useServerFn(pollRunnerJob);
   const [active, setActive] = useState<{ anchorId: string; jobId: string } | null>(null);
 
@@ -37,12 +39,18 @@ export function useAnchorSubmission(appPrefix: string | null | undefined) {
       if (result.result) {
         setActive(null);
         void qc.invalidateQueries({ queryKey: ["anchors"] });
-        if (result.result.ok) {
+        if (!result.result.ok) {
+          toast.error(result.result.error);
+        } else if (result.kind === "verify") {
+          if (result.result.member) {
+            toast.success("Commitment found in the contract's on-chain set.");
+          } else {
+            toast.warning("The commitment is NOT in the on-chain set — this anchor does not verify.");
+          }
+        } else {
           toast.success(
             `Anchored${result.result.blockHeight ? ` in block #${result.result.blockHeight}` : ""}.`,
           );
-        } else {
-          toast.error(result.result.error);
         }
       }
       return result;
@@ -59,9 +67,20 @@ export function useAnchorSubmission(appPrefix: string | null | undefined) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const verify = useMutation({
+    mutationFn: (anchorId: string) => verifyFn({ data: { appPrefix: appPrefix!, anchorId } }),
+    onSuccess: (r, anchorId) => {
+      setActive({ anchorId, jobId: r.jobId });
+      toast.info("Reading the contract ledger for this commitment…");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return {
     submit,
+    verify,
     activeAnchorId: active?.anchorId ?? null,
+    activeKind: job.data?.kind ?? null,
     log: job.data?.log ?? "",
   };
 }

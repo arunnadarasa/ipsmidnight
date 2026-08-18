@@ -467,8 +467,14 @@ async function probeIndexer(url: string): Promise<{ probe: ProbeResult; blockHei
   }
 }
 
-/** Read-only ledger verification: confirm a contract call really landed. */
-export async function verifyAnchorOnChain(input: {
+/**
+ * Liveness check only: does the indexer know about this contract at all?
+ *
+ * This deliberately does NOT verify an anchor — it cannot tell which commitment
+ * a transaction carried. Commitment membership is proved by the runner's
+ * verify-midnight job (see startVerifyJob), which reads the contract's ledger.
+ */
+export async function probeContractOnChain(input: {
   indexerUrl: string;
   contractAddress: string;
   txHash?: string | null;

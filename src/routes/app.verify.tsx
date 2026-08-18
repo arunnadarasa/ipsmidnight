@@ -40,7 +40,7 @@ function VerifyWorkspace() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("credential_records")
-        .select("id,credential_jwt,claims,issuer_did,subject_did")
+        .select("id,credential_jwt,claims,issuer_did,subject_did,simulated,state")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
@@ -52,7 +52,7 @@ function VerifyWorkspace() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("midnight_anchors")
-        .select("id,digest,commitment,status,block_height,tx_hash,network")
+        .select("id,digest,commitment,salt,status,block_height,tx_hash,network")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
@@ -81,21 +81,36 @@ function VerifyWorkspace() {
       );
       const anchor = anchors.data?.find((a) => a.digest === digest);
 
+      // The commitment is only meaningful if it can be recomputed from the
+      // pasted bundle: digest + persisted salt. Anchors written before the salt
+      // was persisted cannot be checked and must not read as verified.
       let commitmentOk: boolean | null = null;
       let commitmentDetail = "No anchor on record for this digest.";
-      if (anchor?.commitment) {
-        // The salt is not stored client-side; a matching digest plus a confirmed
-        // ledger entry is what binds the summary to the anchor.
-        commitmentOk = anchor.status === "confirmed";
+      const onLedger = anchor?.status === "anchored" || anchor?.status === "confirmed";
+      if (anchor?.commitment && !anchor.salt) {
+        commitmentOk = false;
         commitmentDetail =
-          anchor.status === "confirmed"
-            ? `Anchor confirmed on ${anchor.network}${anchor.block_height ? ` at block #${anchor.block_height}` : ""}.`
-            : `Anchor found but still ${anchor.status} — verify it on the Midnight page.`;
+          "This anchor predates salt persistence, so its commitment cannot be recomputed — re-anchor the summary.";
+      } else if (anchor?.commitment && anchor.salt) {
+        const recomputed = await ipsCommitment(digest, anchor.salt);
+        if (recomputed !== anchor.commitment) {
+          commitmentOk = false;
+          commitmentDetail = "The stored commitment does not match this summary's digest and salt.";
+        } else if (!onLedger) {
+          commitmentOk = false;
+          commitmentDetail = `Commitment recomputed, but the anchor is still ${anchor.status} — submit it on the Midnight page.`;
+        } else {
+          commitmentOk = true;
+          commitmentDetail = `Commitment recomputed and anchored on ${anchor.network}${
+            anchor.block_height ? ` at block #${anchor.block_height}` : ""
+          }. Re-check membership on the Midnight page for a live ledger read.`;
+        }
       }
 
       const decoded = credential?.credential_jwt ? decodeCredential(credential.credential_jwt) : null;
       const vc = decoded?.["vc"] as { credentialSubject?: Record<string, unknown> } | undefined;
       const subjectDigest = vc?.credentialSubject?.["summaryDigest"];
+      const hasJwt = Boolean(credential?.credential_jwt);
 
       const blocking = validation.issues.filter((i) => i.severity === "error").length;
       setChecks([
@@ -112,20 +127,31 @@ function VerifyWorkspace() {
           detail: digest,
         },
         {
-          label: "Credential exists for this digest",
-          ok: Boolean(credential),
-          detail: credential
-            ? `Issued by ${credential.issuer_did ?? "unknown issuer"}.`
-            : "No issued credential matches this summary.",
+          label: "A real credential was issued for this digest",
+          ok: Boolean(credential) && hasJwt,
+          detail: !credential
+            ? "No issued credential matches this summary."
+            : hasJwt
+              ? `Issued by ${credential.issuer_did ?? "unknown issuer"} (state ${credential.state ?? "unknown"}).`
+              : `An offer exists (state ${credential.state ?? "unknown"}) but no credential has been issued yet — nothing to verify.`,
         },
         {
           label: "Credential subject binds the same digest",
-          ok: credential ? subjectDigest === digest : null,
-          detail: credential
+          ok: hasJwt ? subjectDigest === digest : null,
+          detail: hasJwt
             ? subjectDigest === digest
               ? "credentialSubject.summaryDigest matches."
               : "The credential claims a different digest."
-            : "Skipped — no credential.",
+            : "Skipped — no credential to decode.",
+        },
+        {
+          label: "Issuer signature verified",
+          ok: hasJwt ? false : null,
+          detail: !hasJwt
+            ? "Skipped — no credential to decode."
+            : credential?.simulated
+              ? "This is a simulated credential: alg is \"none\" and the signature is a stub hash. It proves nothing."
+              : "Not checked — the console decodes the JWT payload but performs no JWS verification, DID resolution, or status-list check.",
         },
         {
           label: "Midnight commitment anchored",
@@ -208,8 +234,21 @@ function VerifyWorkspace() {
               Paste a bundle and run the checks. Nothing you paste is stored.
             </p>
           )}
-          {summary?.allOk ? (
-            <Badge className="mt-4 bg-success/15 text-success">Summary verified end to end</Badge>
+          {checks ? (
+            <div className="mt-4 space-y-2">
+              {checks.every((c) => c.ok !== false) ? (
+                <Badge className="bg-success/15 text-success">Digest and anchor checks passed</Badge>
+              ) : (
+                <Badge variant="outline" className="text-destructive">
+                  Not verifiable — see the failed checks
+                </Badge>
+              )}
+              <p className="text-xs text-muted-foreground">
+                No cryptographic signature is verified anywhere in this console: credentials are decoded, not
+                validated. Treat a pass as "the digest and the ledger anchor line up", never as proof of issuer
+                identity.
+              </p>
+            </div>
           ) : null}
         </Panel>
       </div>

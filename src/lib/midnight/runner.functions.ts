@@ -120,8 +120,49 @@ export const anchorQueuedSummary = createServerFn({ method: "POST" })
   });
 
 /**
+ * Read-only ledger membership check for an anchor's commitment. A transaction
+ * hash only proves something was submitted; this proves the commitment is in
+ * the contract's on-chain Set.
+ */
+export const verifyAnchorMembership = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; anchorId: string }) => ({
+    appPrefix: validPrefix(input.appPrefix),
+    anchorId: input.anchorId,
+  }))
+  .handler(async ({ data, context }) => {
+    const { startVerifyJob } = await import("./runner.server");
+    const { supabase, userId } = context;
+
+    const { data: anchor, error } = await supabase
+      .from("midnight_anchors")
+      .select("id, commitment")
+      .eq("id", data.anchorId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error || !anchor?.commitment) throw new Error("That anchor has no commitment to check.");
+
+    const { data: contract } = await supabase
+      .from("midnight_contracts")
+      .select("address")
+      .eq("user_id", userId)
+      .eq("app_prefix", data.appPrefix)
+      .eq("contract_name", "IpsAnchorRegistry")
+      .maybeSingle();
+    if (!contract?.address) throw new Error("Deploy the anchor contract first.");
+
+    return startVerifyJob({
+      appPrefix: data.appPrefix,
+      commitment: anchor.commitment.replace(/^0x/, ""),
+      contractAddress: contract.address,
+      anchorId: anchor.id,
+    });
+  });
+
+/**
  * Polls a detached job and, when it finished successfully, persists what it
- * produced: a contract address for deploys, a tx id / block height for anchors.
+ * produced: a contract address for deploys, a tx id / block height for anchors,
+ * a confirmed-or-not verdict for verifications.
  */
 export const pollRunnerJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -165,6 +206,29 @@ export const pollRunnerJob = createServerFn({ method: "POST" })
         await supabase
           .from("midnight_anchors")
           .update({ status: "error", last_error: job.result.error })
+          .eq("id", data.anchorId)
+          .eq("user_id", userId);
+      }
+    }
+
+    if (job.kind === "verify" && data.anchorId && job.result) {
+      if (job.result.ok) {
+        await supabase
+          .from("midnight_anchors")
+          .update(
+            job.result.member
+              ? { status: "confirmed", last_error: null }
+              : {
+                  status: "error",
+                  last_error: "The commitment is not in the contract's on-chain set — re-anchor it.",
+                },
+          )
+          .eq("id", data.anchorId)
+          .eq("user_id", userId);
+      } else {
+        await supabase
+          .from("midnight_anchors")
+          .update({ last_error: `Membership check failed: ${job.result.error}` })
           .eq("id", data.anchorId)
           .eq("user_id", userId);
       }

@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { isOver18 } from "@/lib/ips/age";
 
 export const provisionIdentusAgent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -229,13 +230,13 @@ export const issueHostedCredential = createServerFn({ method: "POST" })
       .find((r) => r?.["resourceType"] === "Patient");
     const dob = (patient?.["birthDate"] as string | undefined) ?? null;
 
-    // Only the digest and a date-of-birth claim travel — never clinical content.
+    // Data minimisation: only the digest and (optionally) a derived age
+    // assurance travel. Patient name, summary title and the raw birth date are
+    // the standard re-identification pair and stay in the console.
     const claims: Record<string, unknown> = {
       summaryDigest: bundle.digest,
-      summaryTitle: bundle.title,
-      patientName: bundle.patient_name ?? "Unknown patient",
       credentialType: "InternationalPatientSummary",
-      ...(dob ? { dob } : {}),
+      ...(dob ? { over18: isOver18(dob) } : {}),
     };
 
     const offer = await issueConnectionlessCredential({
@@ -245,16 +246,28 @@ export const issueHostedCredential = createServerFn({ method: "POST" })
       claims,
     });
 
+    // The invitation has just been created, so nothing has accepted it yet and
+    // `credential` is null. Poll briefly: the row must only claim to hold a
+    // credential once the protocol really reached CredentialSent/Issued.
     let jwt: string | null = null;
-    try {
-      const record = await getCredentialRecord({
-        baseUrl: conn.base_url,
-        apiKey: conn.api_key,
-        recordId: offer.recordId,
-      });
-      jwt = record.credential ?? null;
-    } catch {
-      jwt = null;
+    let state = offer.state;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const record = await getCredentialRecord({
+          baseUrl: conn.base_url,
+          apiKey: conn.api_key,
+          recordId: offer.recordId,
+        });
+        state = record.protocolState ?? state;
+        if (record.credential) {
+          jwt = record.credential;
+          break;
+        }
+        if (/Failed|Rejected|Abandoned/i.test(state)) break;
+      } catch {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1200));
     }
 
     const { error: insErr } = await supabase.from("credential_records").insert({
@@ -262,10 +275,13 @@ export const issueHostedCredential = createServerFn({ method: "POST" })
       bundle_id: bundle.id,
       agent_id: conn.id,
       issuer_did: data.issuingDid,
-      subject_did: data.issuingDid,
+      // The holder is whoever accepts the connectionless invitation, which has
+      // not happened yet — leaving this null beats naming the issuer as its own
+      // credential subject.
+      subject_did: null,
       claims: claims as never,
       credential_jwt: jwt,
-      state: offer.state,
+      state,
       simulated: false,
       record_id: offer.recordId,
       invitation_url: offer.invitationUrl,

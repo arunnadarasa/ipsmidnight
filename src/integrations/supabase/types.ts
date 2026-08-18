@@ -274,6 +274,7 @@ export type Database = {
           id: string
           last_error: string | null
           network: string
+          salt: string | null
           status: string
           tx_hash: string | null
           updated_at: string
@@ -292,6 +293,7 @@ export type Database = {
           id?: string
           last_error?: string | null
           network?: string
+          salt?: string | null
           status?: string
           tx_hash?: string | null
           updated_at?: string
@@ -310,6 +312,7 @@ export type Database = {
           id?: string
           last_error?: string | null
           network?: string
+          salt?: string | null
           status?: string
           tx_hash?: string | null
           updated_at?: string

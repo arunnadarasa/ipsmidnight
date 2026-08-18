@@ -106,11 +106,17 @@ export const destroyFlyStack = createServerFn({ method: "POST" })
     return { destroyed: true };
   });
 
-export const verifyAnchor = createServerFn({ method: "POST" })
+/**
+ * Indexer liveness probe for an anchor's contract. It records block height and
+ * tx visibility only — it never promotes an anchor to "confirmed", because a
+ * contract action on the indexer says nothing about which commitment it carried.
+ * Confirmation comes from verifyAnchorMembership (runner ledger read).
+ */
+export const probeAnchorContract = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { anchorId: string }) => input)
   .handler(async ({ data, context }) => {
-    const { verifyAnchorOnChain } = await import("./fly.server");
+    const { probeContractOnChain } = await import("./fly.server");
     const { supabase, userId } = context;
 
     const { data: anchor, error } = await supabase
@@ -131,7 +137,7 @@ export const verifyAnchor = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!deployment?.indexer_url) throw new Error("No Fly indexer URL on record — provision the stack first.");
 
-    const result = await verifyAnchorOnChain({
+    const result = await probeContractOnChain({
       indexerUrl: deployment.indexer_url,
       contractAddress: anchor.contract_address,
       txHash: anchor.tx_hash,
@@ -140,19 +146,17 @@ export const verifyAnchor = createServerFn({ method: "POST" })
     await supabase
       .from("midnight_anchors")
       .update({
-        status: result.ok ? "confirmed" : "pending",
-        block_height: result.blockHeight,
-        tx_hash: result.txHash ?? anchor.tx_hash,
+        block_height: result.blockHeight ?? null,
         last_error: result.ok ? null : result.detail,
       })
       .eq("id", anchor.id);
 
     await supabase.from("activity_log").insert({
       user_id: userId,
-      kind: result.ok ? "anchor.verified" : "anchor.unverified",
+      kind: "anchor.probed",
       summary: result.ok
-        ? `Anchor ${anchor.digest.slice(0, 12)}… confirmed on the indexer${result.blockHeight ? ` at block #${result.blockHeight}` : ""}`
-        : `Anchor ${anchor.digest.slice(0, 12)}… not yet visible: ${result.detail}`,
+        ? `Contract for ${anchor.digest.slice(0, 12)}… seen on the indexer${result.blockHeight ? ` at block #${result.blockHeight}` : ""} (commitment not checked)`
+        : `Contract for ${anchor.digest.slice(0, 12)}… not visible: ${result.detail}`,
       metadata: { anchorId: anchor.id } as never,
     });
 

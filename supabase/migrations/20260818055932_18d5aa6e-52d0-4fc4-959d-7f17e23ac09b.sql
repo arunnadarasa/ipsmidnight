@@ -1,0 +1,1 @@
+ALTER TABLE public.midnight_anchors ADD COLUMN IF NOT EXISTS salt text;
