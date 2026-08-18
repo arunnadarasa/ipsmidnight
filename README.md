@@ -183,16 +183,20 @@ Security posture:
 
 `contracts/IpsAnchorRegistry.compact` is an **append-only commitment registry**. It exposes a circuit that takes a commitment derived from `(IPS_DOMAIN, digest)` and inserts it into a ledger set, refusing duplicates. Reads are membership checks — the contract stores no patient data, no identifiers, and no metadata that could be correlated back to a person.
 
-The toolchain flow used here is deliberately unusual and worth calling out: the **Compact compiler runs in the Lovable Linux sandbox**, not on a developer laptop.
+The toolchain flow used here is deliberately unusual and worth calling out: the **Compact compiler runs in the Lovable Linux sandbox**, not on a developer laptop; and **contract deploy / anchor / verify run on a dedicated runner machine inside the Fly app**, not from a terminal. The runner is a `node:22-bookworm-slim` machine that installs the Midnight SDK onto a 10 GB volume and executes the scripts as detached jobs polled over Fly's `exec` API — because proving needs a persistent disk and long-lived proof-server sessions that the app's serverless runtime cannot host.
 
 ```sh
 # in the sandbox
 compact compile contracts/IpsAnchorRegistry.compact contracts/managed
 # compiled ZK keys / IR are published under public/keys and public/zkir
-node scripts/deploy-midnight.mjs   # deploys against the provisioned Fly stack
+
+# from the app UI (Deploy → Anchor contract), the runner then runs:
+node scripts/deploy-midnight.mjs   # prove + submit the initial contract state
+node scripts/anchor-midnight.mjs   # submit a commitment to the deployed contract
+node scripts/verify-midnight.mjs   # read-only: is the commitment in the on-chain Set?
 ```
 
-Deployment targets the Fly-hosted Undeployed stack over public HTTPS (indexer GraphQL + proof server), with the node's RPC reached over 6PN from a one-shot machine in the same Fly app.
+The SDK is pinned in `src/lib/midnight/shared.ts` (`DEP_GROUPS`) and installed in four sequential groups to keep the runner's memory peak down; the `artifactVersion` marker on the volume forces a re-bootstrap when the pins change. Deployment targets the Fly-hosted Undeployed stack over public HTTPS (indexer GraphQL + proof server), with the node's RPC reached over TLS.
 
 ---
 
@@ -201,11 +205,14 @@ Deployment targets the Fly-hosted Undeployed stack over public HTTPS (indexer Gr
 - **Hard server/client boundary.** `*.server.ts` for anything that touches a credential; `*.functions.ts` as thin `createServerFn` wrappers with nothing at module scope but imports, types and the exported declarations. Server-function splitting deletes runtime siblings, so helpers live in imported modules.
 - **No browser-only library in the SSR graph.** Midnight's JS SDK is loaded lazily on the client, never statically imported from a route that server-renders.
 - **Every image tag pinned.** `proof-server:latest` shipped incompatible proving keys mid-demo; tags are now fixed and the reason is a comment in `shared.ts`.
+- **Every SDK version pinned, including transitive peers.** `compact-js` and `midnight-js` version independently; a caret on an alpha (`compact-js@2.5.3` → `ledger-v9@^0.1.0-alpha.1`) can point at a range that was never published and fail with `ETARGET`. All four `DEP_GROUPS` are exact-pinned in `shared.ts`.
 - **Env contracts documented next to the spec.** Indexer 4.x refuses to boot unless every `APP__INFRA__*` key is present, so the full set lives in one exported constant instead of being scattered across the provisioner.
-- **Idempotent, granular recovery.** Provision, check, repair, repair-Identus-only and destroy are separate operations; repairing a broken agent must not restart a healthy ledger.
+- **Idempotent, granular recovery.** Provision, check, repair, repair-Identus-only and destroy are separate operations; repairing a broken agent must not restart a healthy ledger. The runner has its own escape hatch — `resetRunnerToolchain` clears a half-finished install without touching the volume or the deployed contract.
 - **Errors are surfaced, not swallowed.** Every non-OK provider response logs and returns the upstream status *and* body. A generic 500 during infrastructure bring-up costs hours.
-- **Design tokens, not hardcoded colours.** A "Midnight dark" clinical theme (Sora / Manrope) defined in `src/styles.css`; components use semantic tokens.
-- **Mobile-first review.** Headings and panel actions stack on small screens, tab strips scroll horizontally, long hashes and IDs wrap instead of overflowing, touch targets are enlarged, and the app header is sticky.
+- **Long-running jobs are observable from the start.** Runner jobs run detached (Fly caps `exec` at ~30s) and are polled; each writes step markers, a 30 s heartbeat, a `step`-named "what failed" label, and a result file. A killed job (no result + not alive) is reported as a likely OOM restart via `machineEventSummary`, not "still running".
+- **Progress is monotonic.** The runner log is a 3 kB rolling tail, so an early marker can scroll out of view and make a completed step look pending again; `useMonotonicSteps` / `clampSteps` lock done steps to done.
+- **Design tokens, not hardcoded colours.** An "Arctic Clean Light" clinical theme (ice-blue surfaces, glass-morphism, Sora / Manrope) defined in `src/styles.css`; components use semantic tokens.
+- **Mobile-first review.** Headings and panel actions stack on small screens, tab strips scroll horizontally, long hashes and IDs wrap instead of overflowing, touch targets are enlarged, the app header is sticky, and anchor rows stack metadata-first with two equal full-width buttons.
 
 ---
 
