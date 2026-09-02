@@ -244,7 +244,7 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 - **Undeployed / dev network only.** The Midnight stack runs the local dev preset. There is no testnet or mainnet wiring, no faucet-funded production wallet, and no key management story beyond what the dev preset provides.
 - **No signature verification anywhere.** The verify page decodes credentials; it does not validate JWS, resolve issuer DIDs, or check revocation status. A "checks passed" verdict means the digest and the ledger anchor line up — nothing about issuer identity.
 - **Simulated Identus mode is not a trust chain.** It produces credential-shaped records for demos (`alg: none`, stub signature) and the verify page marks them as proving nothing. Only the Fly Cloud Agent mode involves real DIDs and signatures.
-- **PRISM DIDs are not externally resolvable.** The Fly PRISM node runs against its own database with no Cardano ledger backing, so published DIDs resolve only inside this stack. A third party cannot resolve them.
+- **PRISM DIDs are not externally resolvable.** The Fly PRISM node runs against its own database with no Cardano ledger backing, so published DIDs resolve only inside this stack. A third party cannot resolve them. There is a known Midnight-native remedy we have deliberately not taken yet: `did:midnight` ([`@midnight-ntwrk/midnight-did@0.5.0`](https://midnightntwrk.github.io/midnight-did/) plus its `-did-contract` companion) keeps DID documents in a Compact contract, so a DID document would be resolvable over the same indexer read path `scripts/verify-midnight.mjs` already uses. It is not adopted because the `did:midnight` identifier syntax was still an open design discussion in the upstream repo, the packages are pre-1.0, and its credential counterpart ([`midnight-verifiable-credentials`](https://github.com/midnightntwrk/midnight-verifiable-credentials)) publishes nothing yet. The final syntax, the credential formats that repo will support, and the network support matrix are all unconfirmed as of this writing.
 - **Fly stacks are ephemeral and single-tenant.** One app per kind per user, no multi-region, no autoscaling, and destroy is the intended cleanup path.
 - **Log retrieval is best-effort.** With no Machines log API, a container that dies instantly can still outrun the boot-log read.
 - **Validation is structural, not full FHIR conformance.** It checks the IPS document skeleton, required sections and LOINC codes and reference resolvability — it is not a substitute for the official validator or terminology server checks.
@@ -267,7 +267,17 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 11. **Distinguish "submitted" from "verified" in the data model.** The first version treated a transaction hash as proof. Persisting a separate `verified_at` / on-ledger flag — and making the UI's primary action "Check ledger" only after an anchor exists — keeps the trust story honest: submission is a claim, membership is the proof.
 12. **Bring the contract lifecycle into the UI on day one.** Doing deploy/anchor/verify from a terminal, then porting it, meant two sources of truth and a UI that lagged the scripts. Next time the runner + scripts are the only path; the terminal is never the default.
 
+### Ecosystem watch — Midnight-native DID and VC
+
+The identity half of this stack has a plausible Midnight-native future, and the credential half does not yet. Recording the split so the next person does not re-research it:
+
+- **DID layer: a path exists.** `midnight-did` ships a Compact DID contract plus a TypeScript mapping layer to W3C DID documents at `0.5.0`; resolver service, DID manager and key custody live in a separate `midnight-did-resolver` repo with nothing published to npm. Resolution is an indexer read of contract state — the same shape as our anchor verification.
+- **VC layer: no path yet.** `midnight-verifiable-credentials` was created in December 2025, publishes no packages, and its open issues are dominated by dev-tooling work rather than credential features. Credential formats, selective disclosure and revocation are undocumented.
+- **The two must move together.** Migrating DIDs without credential verification produces a DID that resolves and a credential nobody can check — worse than the status quo, because it *looks* complete. Until the VC repo ships, issuance and verification stay an Identus (or hand-rolled JOSE) problem.
+- **A DID contract is an addition, not a replacement.** `IpsAnchorRegistry` stays exactly as it is; `did:midnight` would be a second contract, a second proving flow and a second thing that can be down.
+
 ---
+
 
 ## Local development and setup
 

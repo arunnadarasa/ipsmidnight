@@ -980,3 +980,55 @@ eventually exits `status=1`.
 - Showing a detached job's only error in a toast.
 - Deriving status colour in two places.
 - Calling a submitted transaction "verified".
+
+---
+
+## 2026-09 update — Midnight-native DID and VC ecosystem state
+
+Sources: https://midnightntwrk.github.io/midnight-did/ and
+https://github.com/midnightntwrk/midnight-verifiable-credentials. Read this before
+promising a user a "Midnight-native identity + credentials" stack.
+
+1. **`did:midnight` exists and is real code.** `@midnight-ntwrk/midnight-did-contract`
+   (Compact contract holding DID state on-ledger: verification methods, relations,
+   services, aliases, metadata, plus lifecycle circuits) and
+   `@midnight-ntwrk/midnight-did` (mapping layer from ledger state to W3C DID Core
+   documents), both published at `0.5.0` after a long `0.4.0-snapshot.*` / `0.5.0-rc*`
+   stream. Resolution is an **indexer read of contract state** — the same shape as any
+   other public-ledger read. Resolver service, DID manager UI and key custody live in a
+   separate `midnight-did-resolver` repo with nothing found published to npm; expect to
+   self-host or write your own reader.
+2. **There is NO usable Midnight-native VC stack yet.**
+   `midnight-verifiable-credentials` was created Dec 2025, publishes no npm packages,
+   and its open issues are dominated by dev-tooling/SDLC work rather than credential
+   features. Credential formats (JWT / SD-JWT / BBS+), selective disclosure and
+   revocation are undocumented. Signature verification stays your own problem (JOSE) or
+   an external agent's (Identus). Do not scaffold imports against guessed package names.
+3. **Adopting DIDs does not adopt VCs.** Shipping `did:midnight` without credential
+   verification produces a DID that resolves and a credential nobody can check — that is
+   *worse* than the status quo, because the UI looks complete. Move both layers or
+   neither, and keep the verify surface labelled "signature not checked" until JWS
+   verification actually runs.
+4. **Pin exact `0.x` versions and treat identifier-format changes as breaking.** The
+   `did:midnight` syntax — including how it embeds the deploying contract's address —
+   was still an open upstream design discussion. This is the same trap as
+   `compact-js@2.5.3` → unpublished `ledger-v9` alpha: a caret on a pre-1.0 package
+   whose format is unsettled.
+5. **A DID contract is an addition, not a replacement.** It does not subsume your
+   application's anchoring/commitment contract: it is a second contract, a second
+   proving flow, and a second thing that can be down. Keep the two lifecycles separate.
+6. **Don't assume networks beyond Undeployed.** No published network support matrix was
+   found; assume dev/Undeployed only until proven otherwise.
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `npm error 404` on a guessed `@midnight-ntwrk/*` VC package | `midnight-verifiable-credentials` publishes nothing | Don't scaffold against it; use Identus or hand-rolled JOSE for VC issue/verify |
+| DID resolves but credential signature is unchecked, UI reads "verified" | DID migration shipped without a VC verification path | Label honestly; ship verification before the "verified" affordance |
+| `did:midnight` identifiers break after a dependency bump | Identifier syntax still unsettled upstream, caret range in place | Exact-pin `midnight-did` / `midnight-did-contract`; treat bumps as breaking |
+| An in-container/in-memory DID ledger presented as externally resolvable | Self-hosted PRISM-style node with no public ledger backing | Either state plainly that DIDs are stack-local, or move DID state on-ledger |
+
+### Anti-patterns (append)
+
+- Promising "Midnight-native verifiable credentials" today — the DID half ships, the VC half does not.
+- Migrating the DID method while leaving signature verification unimplemented.
+- Caret ranges on `midnight-did*` while its identifier spec is under discussion.
