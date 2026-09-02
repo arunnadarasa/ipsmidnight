@@ -252,9 +252,13 @@ export function midnightSteps(input: {
     | undefined;
   /** Whether the Fly app itself exists; false = never provisioned / destroyed. */
   exists?: boolean | null;
+  /** The readiness check errored — we have no live signal at all. */
+  checkFailed?: boolean;
 }): StackStep[] {
-  const { appName, machines, probes, diagnostics, exists } = input;
+  const { appName, machines, probes, diagnostics, exists, checkFailed } = input;
   if (exists === false) return notProvisionedSteps(MIDNIGHT_STEP_LABELS);
+  if (checkFailed && !machines?.length) return unknownSteps(MIDNIGHT_STEP_LABELS);
+
   const created = exists === true || Boolean(machines?.length);
   const nodeUp = machines?.find((m) => m.name === "midnight-node")?.state === "started";
   const indexerUp = machines?.find((m) => m.name === "midnight-indexer")?.state === "started";
