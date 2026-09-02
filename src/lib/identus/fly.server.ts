@@ -90,7 +90,7 @@ async function fly<T>(path: string, init?: RequestInit & { timeoutMs?: number })
 }
 
 
-async function flyOptional<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function flyOptional<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T | null> {
   try {
     return await fly<T>(path, init);
   } catch (err) {
@@ -98,6 +98,26 @@ async function flyOptional<T>(path: string, init?: RequestInit): Promise<T | nul
     if (err instanceof Error && /→ 404/.test(err.message)) return null;
     throw err;
   }
+}
+
+/**
+ * Updating a Machine already initiates its replacement/restart. Calling the
+ * restart endpoint immediately afterwards races that transition and Fly rejects
+ * it with `failed_precondition`. Only issue an explicit start when the update
+ * response says the machine is stably stopped, then wait for convergence.
+ */
+async function updateMachineAndWait(appName: string, machineId: string, body: string) {
+  const updated = await fly<FlyMachine>(`/apps/${appName}/machines/${machineId}`, {
+    method: "POST",
+    body,
+  });
+  if (updated.state === "stopped") {
+    await fly(`/apps/${appName}/machines/${machineId}/start`, { method: "POST" });
+  }
+  await flyOptional(`/apps/${appName}/machines/${machineId}/wait?state=started&timeout=60`, {
+    timeoutMs: 65_000,
+  });
+  return updated;
 }
 
 async function ensureApp(appName: string, orgSlug: string) {
@@ -314,7 +334,7 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
       return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
     }
-    await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
+    await updateMachineAndWait(appName, existing.id, body);
     return { ...existing, state: "updating" };
   }
   return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
@@ -355,8 +375,7 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
         await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
       }
     } else if (existing) {
-      await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
-      await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
+      await updateMachineAndWait(appName, existing.id, body);
     } else {
       await fly(`/apps/${appName}/machines`, { method: "POST", body });
     }
@@ -546,6 +565,11 @@ export async function agentBootLog(appName: string): Promise<AgentBootLog> {
       if (res.ok) {
         const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
         const raw = (json.data ?? []).map((d) => d.attributes?.message ?? "").join("\n").trim();
+        // This is a Fly control-plane response, not an agent boot log. Showing
+        // it as the diagnosis hides the useful machine-state fallback below.
+        if (/^(?:the )?machine (?:hasn't|has not) started[.!]?$/i.test(raw)) {
+          throw new Error("Agent log endpoint is temporarily unavailable");
+        }
         const summary = pickErrorText(raw);
         if (summary) return { summary, raw: raw.slice(-9000), source: "app-log-api", reason: null };
       }
@@ -705,11 +729,6 @@ export async function repairAgentEndpoints(appName: string, adminKey: string, re
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const agent = machines.find((m) => m.name === "identus-cloud-agent");
   if (!agent) throw new Error("No cloud-agent machine on this app — provision it first.");
-  const spec = machineSpec("cloud-agent", appName, adminKey);
-  await fly(`/apps/${appName}/machines/${agent.id}`, {
-    method: "POST",
-    body: JSON.stringify({ name: spec.name, region, config: spec.config }),
-  });
-  await flyOptional(`/apps/${appName}/machines/${agent.id}/restart`, { method: "POST" });
+  await ensureMachine(appName, "cloud-agent", region, adminKey);
   return identusStackUrls(appName);
 }
