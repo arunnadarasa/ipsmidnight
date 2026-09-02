@@ -633,6 +633,8 @@ function StackDetail({
                 machines={identusMachines}
                 steps={identusStepList}
                 bootLog={identusAbsent ? null : stackDiags?.agentLog ?? null}
+                dbProbe={identusAbsent ? null : stackDiags?.dbProbe ?? null}
+
                 startedAt={identusAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
                 onRetry={onCheck}
