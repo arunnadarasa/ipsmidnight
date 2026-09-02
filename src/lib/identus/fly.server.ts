@@ -330,23 +330,30 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
  * column name) needs a fresh data directory anyway. Only agent-internal state
  * lives there (no patient summaries or issued credentials), and the Midnight app
  * is never touched by this call.
-
+ *
+ * The cloud agent is recreated too when it is still missing the boot-log volume:
+ * a mount cannot be added to a live machine, and without it every crash-loop
+ * reads back as "the machine hasn't started" instead of the JVM exception.
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const logVolumeId = await ensureLogVolume(appName, region);
   const repaired: string[] = [];
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey);
+    const spec = machineSpec(kind, appName, adminKey, kind === "cloud-agent" ? logVolumeId : null);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
-    const recreate = kind === "postgres";
+    const recreate =
+      kind === "postgres" || (kind === "cloud-agent" && existing && needsLogVolume(existing, logVolumeId));
     if (existing && recreate) {
       // 404 means it is already gone — either way we continue to the create below.
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
       const fresh = await fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
       // Let Postgres finish initdb before the agent is restarted against it,
       // otherwise the agent burns its first boot on "connection refused".
-      await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
+      if (kind === "postgres") {
+        await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
+      }
     } else if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
