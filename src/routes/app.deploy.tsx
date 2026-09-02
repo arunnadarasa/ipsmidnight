@@ -95,9 +95,10 @@ type StackSummary = {
   appPrefix: string;
   region: string;
   created_at: string;
-  identus?: { status: string; last_error: string | null; agent_url: string | null };
-  midnight?: { status: string; last_error: string | null; indexer_url: string | null; proof_url: string | null };
+  identus?: { status: string; last_error: string | null; agent_url: string | null; machines?: MachineLike[] };
+  midnight?: { status: string; last_error: string | null; indexer_url: string | null; proof_url: string | null; machines?: MachineLike[] };
 };
+
 
 function DeployConsole() {
   const qc = useQueryClient();
