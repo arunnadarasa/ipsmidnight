@@ -707,6 +707,8 @@ function HalfCard({
   machines,
   steps,
   bootLog,
+  dbProbe,
+
   startedAt,
   regionLabel,
   onRetry,
