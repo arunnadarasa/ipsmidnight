@@ -143,10 +143,27 @@ function notProvisionedSteps(labels: [string, string][]): StackStep[] {
   }));
 }
 
+/**
+ * The readiness check itself failed, so we know nothing about this half. This is
+ * NOT the same as "no progress": showing a fresh spinner here would claim the
+ * stack has completed zero steps when it may be perfectly healthy on Fly.
+ */
+function unknownSteps(labels: [string, string][]): StackStep[] {
+  return labels.map(([key, label], i) => ({
+    key,
+    label,
+    state: "pending" as StepState,
+    ...(i === 0
+      ? { hint: "status unknown — the readiness check could not reach Fly. Hit Check to retry." }
+      : {}),
+  }));
+}
+
 /** True when the derived step list is the "nothing provisioned" placeholder. */
 export function isNotProvisioned(steps: StackStep[]) {
   return steps.length > 0 && steps.every((s) => s.state === "pending");
 }
+
 
 export function identusSteps(input: {
   appName?: string | null;
