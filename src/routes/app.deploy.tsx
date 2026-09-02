@@ -136,11 +136,15 @@ function DeployConsole() {
     [stacks, activePrefix],
   );
 
-  // Poll readiness for the selected stack while it is not ready.
+  // Poll readiness for the selected stack while it is not ready. `placeholderData`
+  // keeps the last good payload on screen when a poll fails, so a dropped check
+  // never redraws the timelines as a stack that has done nothing.
   const readiness = useQuery<ReadinessResult | null>({
     queryKey: ["stack_readiness", selected?.appPrefix],
     queryFn: async () => (selected ? ((await check({ data: { appPrefix: selected.appPrefix } })) as ReadinessResult) : null),
     enabled: Boolean(selected),
+    placeholderData: (prev) => prev,
+    retry: 1,
     refetchInterval: (q) => {
       const d = q.state.data as ReadinessResult | null;
       if (d && d.allReady) return false;
@@ -149,6 +153,27 @@ function DeployConsole() {
       return Date.now() - started > 10 * 60 * 1000 ? 20000 : 12000;
     },
   });
+
+  // Slow exec-based reads. They only matter once a half is known unhealthy, and
+  // they live in their own request so a hanging exec degrades to "no log
+  // captured" rather than killing the readiness poll.
+  const readDiagnostics = useServerFn(stackDiagnostics);
+  const needsIdentusLog = Boolean(readiness.data && !readiness.data.identus.ready && readiness.data.identus.exists !== false);
+  const needsMidnightLog = Boolean(readiness.data && !readiness.data.midnight.ready && readiness.data.midnight.exists !== false);
+  const diagnosticsQuery = useQuery<DiagnosticsResult | null>({
+    queryKey: ["stack_diagnostics", selected?.appPrefix, needsIdentusLog, needsMidnightLog],
+    queryFn: async () =>
+      selected
+        ? ((await readDiagnostics({
+            data: { appPrefix: selected.appPrefix, identus: needsIdentusLog, midnight: needsMidnightLog },
+          })) as DiagnosticsResult)
+        : null,
+    enabled: Boolean(selected) && (needsIdentusLog || needsMidnightLog),
+    placeholderData: (prev) => prev,
+    retry: false,
+    refetchInterval: 45000,
+  });
+
 
   const provisionMut = useMutation({
     mutationFn: () =>
