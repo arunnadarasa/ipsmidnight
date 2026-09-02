@@ -670,27 +670,32 @@ export const listStacks = createServerFn({ method: "GET" })
     const { supabase, userId } = context;
     const { data, error } = await supabase
       .from("fly_deployments")
-      .select("id,kind,app_prefix,region,status,last_error,agent_url,indexer_url,proof_url,created_at")
+      .select("id,kind,app_prefix,region,status,last_error,agent_url,indexer_url,proof_url,machines,created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
+    type MachineLike = { name: string; id: string; state: string; region?: string | null };
     // group rows by app_prefix into combined stacks
     const map = new Map<string, {
       appPrefix: string;
       region: string;
       created_at: string;
-      identus?: { status: string; last_error: string | null; agent_url: string | null };
-      midnight?: { status: string; last_error: string | null; indexer_url: string | null; proof_url: string | null };
+      identus?: { status: string; last_error: string | null; agent_url: string | null; machines: MachineLike[] };
+      midnight?: { status: string; last_error: string | null; indexer_url: string | null; proof_url: string | null; machines: MachineLike[] };
     }>();
     for (const row of data ?? []) {
       const entry = map.get(row.app_prefix) ?? { appPrefix: row.app_prefix, region: row.region, created_at: row.created_at };
       if (entry.created_at < row.created_at) entry.created_at = row.created_at;
+      // Last known machine states, so a failed live check still shows real state
+      // instead of an empty timeline.
+      const machines = Array.isArray(row.machines) ? (row.machines as unknown as MachineLike[]) : [];
       if (row.kind === "identus") {
-        entry.identus = { status: row.status, last_error: row.last_error, agent_url: row.agent_url };
+        entry.identus = { status: row.status, last_error: row.last_error, agent_url: row.agent_url, machines };
       } else if (row.kind === "midnight") {
-        entry.midnight = { status: row.status, last_error: row.last_error, indexer_url: row.indexer_url, proof_url: row.proof_url };
+        entry.midnight = { status: row.status, last_error: row.last_error, indexer_url: row.indexer_url, proof_url: row.proof_url, machines };
       }
       map.set(row.app_prefix, entry);
     }
     return [...map.values()];
   });
+
