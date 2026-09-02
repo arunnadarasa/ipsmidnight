@@ -295,12 +295,25 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
   });
 }
 
+/** True when the running machine is missing the log volume the spec now wants. */
+function needsLogVolume(existing: FlyMachine, logVolumeId: string | null) {
+  if (!logVolumeId) return false;
+  return !(existing.config?.mounts ?? []).some((m) => m.path === AGENT_LOG_DIR);
+}
+
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
-  const spec = machineSpec(kind, appName, adminKey);
+  const logVolumeId = kind === "cloud-agent" ? await ensureLogVolume(appName, region) : null;
+  const spec = machineSpec(kind, appName, adminKey, logVolumeId);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
   if (existing) {
+    // A mount can only be attached by replacing the machine. Only agent-internal
+    // state lives on the agent machine, so recreating it is safe.
+    if (needsLogVolume(existing, logVolumeId)) {
+      await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
+      return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
+    }
     await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
     return { ...existing, state: "updating" };
   }
