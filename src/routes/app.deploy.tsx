@@ -799,6 +799,34 @@ function HalfCard({
         )}
 
 
+        {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (
+          <details className="rounded-xl border border-border bg-card/60 px-2.5 py-1.5">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Boot log</summary>
+            {bootLog.raw ? (
+              <>
+                <div className="mt-1.5 flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(bootLog.raw ?? "");
+                      toast.success("Copied.");
+                    }}
+                  >
+                    <Copy className="mr-1 h-3 w-3" /> Copy log
+                  </Button>
+                </div>
+                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                  {bootLog.raw}
+                </pre>
+              </>
+            ) : (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">{bootLog.reason}</p>
+            )}
+          </details>
+        ) : null}
+
         {machines?.length ? (
           <details className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-2.5 py-1.5">
             <summary className="cursor-pointer text-[11px] text-muted-foreground">Fly machines ({machines.length})</summary>
@@ -810,6 +838,13 @@ function HalfCard({
                 </li>
               ))}
             </ul>
+            {stray.length ? (
+              <p className="mt-2 text-[11px] text-warning">
+                {stray.length === 1 ? "1 machine is" : `${stray.length} machines are`} stopped or failed (
+                {stray.map((m) => m.name).join(", ")}). Leftovers from an earlier repair can sit in the same private-DNS
+                process group — run Repair if this half stays unhealthy.
+              </p>
+            ) : null}
           </details>
         ) : null}
 
