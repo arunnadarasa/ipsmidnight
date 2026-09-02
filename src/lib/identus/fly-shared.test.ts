@@ -33,6 +33,9 @@ describe("Identus database configuration", () => {
       assert.ok(sql.includes(`GRANT USAGE, CREATE ON SCHEMA public TO "${database}-application-user"`));
       assert.ok(sql.includes(`GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${database}-application-user"`));
     }
+  });
+
+
 
   test("resets every application role in place with an escaped password", () => {
     const sql = resetAppRolesSql("safe'password");
