@@ -71,7 +71,15 @@ type DiagnosticsResult = {
     reason: string | null;
   } | null;
   /** Observed Postgres credential state for the agent, or null when unchecked. */
-  dbProbe?: { roles: string[]; authOk: boolean | null; agentConfigMatches: boolean | null; detail: string | null } | null;
+  dbProbe?: {
+    roles: string[];
+    authOk: boolean | null;
+    agentConfigMatches: boolean | null;
+    detail: string | null;
+    verifiers?: string[];
+    hba?: string | null;
+    probeHost?: string | null;
+  } | null;
 
   diagnostics: {
     indexerLog: string | null;
@@ -740,7 +748,15 @@ function HalfCard({
   /** Full boot-log tail for this half, when one was captured. */
   bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
   /** Observed state of the agent's database login, never assumed. */
-  dbProbe?: { roles: string[]; authOk: boolean | null; agentConfigMatches: boolean | null; detail: string | null } | null;
+  dbProbe?: {
+    roles: string[];
+    authOk: boolean | null;
+    agentConfigMatches: boolean | null;
+    detail: string | null;
+    verifiers?: string[];
+    hba?: string | null;
+    probeHost?: string | null;
+  } | null;
 
   startedAt: string | null;
   regionLabel?: string | null;
