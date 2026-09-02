@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
   AGENT_INIT_EXEC,
+  AGENT_BOOT_MARKER,
   AGENT_EXIT_MARKER,
   AGENT_LOG_DIR,
   AGENT_LOG_HISTORY,
@@ -10,6 +11,7 @@ import {
   IDENTUS_IMAGES,
   JAVA_TOOL_OPTIONS,
   cloudAgentDatabaseEnv,
+  cloudAgentCredentialConfigMatches,
   postgresInitSql,
   postgresProbeScript,
   postgresResetScript,
@@ -364,8 +366,22 @@ export type IdentusDbProbe = {
   roles: string[];
   /** True when a real TCP login with the configured password succeeded. */
   authOk: boolean | null;
+  /** Whether the active cloud-agent machine carries the proven credential. */
+  agentConfigMatches: boolean | null;
   detail: string | null;
 };
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function activeAgentCredentialMatches(appName: string, appRolePassword: string) {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const agent = machines.find((m) => m.name === "identus-cloud-agent");
+  if (!agent) return null;
+  const detail = (await flyOptional<FlyMachine>(`/apps/${appName}/machines/${agent.id}`)) ?? agent;
+  return cloudAgentCredentialConfigMatches(detail.config?.env, appRolePassword);
+}
 
 /**
  * Observes the Postgres side of the credential contract instead of assuming it:
@@ -382,6 +398,7 @@ export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | 
       return {
         roles: [],
         authOk: null,
+        agentConfigMatches: null,
         detail: run.state
           ? `Database machine is ${run.state} — credentials can only be probed while it is running.`
           : null,
@@ -396,10 +413,18 @@ export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | 
       .filter((r) => r.endsWith("-application-user"));
     const auth = authLine.slice(DB_PROBE_MARKERS.auth.length).trim();
     const authOk = auth === "1";
+    const agentConfigMatches = await activeAgentCredentialMatches(appName, creds.appRolePassword);
     return {
       roles,
       authOk,
-      detail: authOk ? null : auth ? auth.slice(0, 300) : "No response from the credential probe.",
+      agentConfigMatches,
+      detail: !authOk
+        ? auth
+          ? auth.slice(0, 300)
+          : "No response from the credential probe."
+        : agentConfigMatches === false
+          ? "The active cloud-agent machine still has stale database credentials."
+          : null,
     };
   } catch {
     return null;
@@ -417,6 +442,11 @@ export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | 
 export async function repairIdentusDbCredentials(appName: string): Promise<IdentusDbProbe | null> {
   const creds = await identusDbCreds(appName);
   await execInMachine(appName, "identus-postgres", postgresResetScript(creds.appRolePassword), 30);
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const probe = await identusDbProbe(appName);
+    if (probe?.authOk === true) return probe;
+    if (attempt < 11) await delay(5_000);
+  }
   return identusDbProbe(appName);
 }
 
@@ -448,8 +478,11 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
     const spec = await machineSpec(kind, appName, adminKey, kind === "cloud-agent" ? logVolumeId : null);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
-    const recreate =
-      kind === "postgres" || (kind === "cloud-agent" && existing && needsLogVolume(existing, logVolumeId));
+    // The crash wrapper deliberately keeps a failed agent process alive for ten
+    // minutes so its log remains readable. Recreating the agent is the only
+    // deterministic way to guarantee that this repair starts a new process with
+    // the newly verified env instead of observing that old process as "started".
+    const recreate = kind === "postgres" || kind === "cloud-agent";
     if (existing && recreate) {
       // 404 means it is already gone — either way we continue to the create below.
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
@@ -470,6 +503,20 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
       dbProbe = await identusDbProbe(appName);
       if (dbProbe?.authOk !== true) {
         dbProbe = await repairIdentusDbCredentials(appName);
+      }
+      if (dbProbe?.authOk !== true) {
+        throw new Error(`Database credential repair could not be verified: ${dbProbe?.detail ?? "probe unavailable"}`);
+      }
+    }
+
+    if (kind === "cloud-agent") {
+      dbProbe = await identusDbProbe(appName);
+      if (dbProbe?.authOk !== true || dbProbe.agentConfigMatches !== true) {
+        throw new Error(
+          dbProbe?.agentConfigMatches === false
+            ? "Cloud-agent restart was blocked because its active database credentials do not match the verified Postgres login."
+            : `Cloud-agent restart could not be verified: ${dbProbe?.detail ?? "active configuration unavailable"}`,
+        );
       }
     }
 
@@ -639,10 +686,21 @@ export async function agentBootLog(appName: string): Promise<AgentBootLog> {
         // Diagnose against the failing boot: the section carrying the exit marker
         // if there is one, otherwise the whole tail.
         const sections = raw.split(/^===== /m).filter((s) => s.trim());
-        const failing = sections.find((s) => s.includes(AGENT_EXIT_MARKER) && !/AGENT_EXIT=0\b/.test(s));
-        const summary = pickErrorText(failing ?? raw);
+        // The first section is the current boot. Previous files are retained for
+        // context in the drawer, but must never become the timeline diagnosis for
+        // a newer repair attempt.
+        const current = sections[0] ?? raw;
+        const summary = pickErrorText(current);
         if (summary) {
           return { summary, raw: raw.slice(-9000), source: "boot-log", reason: null };
+        }
+        if (current.includes(AGENT_BOOT_MARKER)) {
+          return {
+            summary: null,
+            raw: raw.slice(-9000),
+            source: "boot-log",
+            reason: "The current agent boot has not reported an error.",
+          };
         }
       }
     } catch {

@@ -545,7 +545,7 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!conn?.api_key) throw new Error("No stored admin key for this Identus stack — reprovision instead.");
 
-    await repairIdentusStack(`${data.appPrefix}-identus`, conn.api_key, region);
+    const repairResult = await repairIdentusStack(`${data.appPrefix}-identus`, conn.api_key, region);
 
     await supabase
       .from("fly_deployments")
@@ -561,7 +561,7 @@ export const repairIdentusOnly = createServerFn({ method: "POST" })
       metadata: { appPrefix: data.appPrefix, scope: "identus" } as never,
     });
 
-    return { ok: true };
+    return { ok: true, dbProbe: repairResult.dbProbe };
   });
 
 /**
