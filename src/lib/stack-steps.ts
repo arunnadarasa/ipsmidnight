@@ -143,25 +143,46 @@ function notProvisionedSteps(labels: [string, string][]): StackStep[] {
   }));
 }
 
+/**
+ * The readiness check itself failed, so we know nothing about this half. This is
+ * NOT the same as "no progress": showing a fresh spinner here would claim the
+ * stack has completed zero steps when it may be perfectly healthy on Fly.
+ */
+function unknownSteps(labels: [string, string][]): StackStep[] {
+  return labels.map(([key, label], i) => ({
+    key,
+    label,
+    state: "pending" as StepState,
+    ...(i === 0
+      ? { hint: "status unknown — the readiness check could not reach Fly. Hit Check to retry." }
+      : {}),
+  }));
+}
+
 /** True when the derived step list is the "nothing provisioned" placeholder. */
 export function isNotProvisioned(steps: StackStep[]) {
   return steps.length > 0 && steps.every((s) => s.state === "pending");
 }
+
 
 export function identusSteps(input: {
   appName?: string | null;
   machines?: MachineLike[] | undefined;
   probes?: Probe[] | undefined;
   status?: string;
-  /** Last error line from the cloud-agent log, when the check pulled one. */
+  /** Last error line from the cloud-agent log, when diagnostics pulled one. */
   logTail?: string | null;
   /** False when no admin key is stored for this stack, so probes cannot run. */
   hasKey?: boolean;
   /** Whether the Fly app itself exists; false = never provisioned / destroyed. */
   exists?: boolean | null;
+  /** The readiness check errored — we have no live signal at all. */
+  checkFailed?: boolean;
 }): StackStep[] {
-  const { appName, machines, probes, logTail, hasKey = true, exists } = input;
+  const { appName, machines, probes, logTail, hasKey = true, exists, checkFailed } = input;
   if (exists === false) return notProvisionedSteps(IDENTUS_STEP_LABELS);
+  if (checkFailed && !machines?.length) return unknownSteps(IDENTUS_STEP_LABELS);
+
   // The app *name* is derived from the prefix, so it can never prove existence —
   // only a confirmed Fly app (or a running machine) counts as created.
   const created = exists === true || Boolean(machines?.length);
@@ -231,9 +252,13 @@ export function midnightSteps(input: {
     | undefined;
   /** Whether the Fly app itself exists; false = never provisioned / destroyed. */
   exists?: boolean | null;
+  /** The readiness check errored — we have no live signal at all. */
+  checkFailed?: boolean;
 }): StackStep[] {
-  const { appName, machines, probes, diagnostics, exists } = input;
+  const { appName, machines, probes, diagnostics, exists, checkFailed } = input;
   if (exists === false) return notProvisionedSteps(MIDNIGHT_STEP_LABELS);
+  if (checkFailed && !machines?.length) return unknownSteps(MIDNIGHT_STEP_LABELS);
+
   const created = exists === true || Boolean(machines?.length);
   const nodeUp = machines?.find((m) => m.name === "midnight-node")?.state === "started";
   const indexerUp = machines?.find((m) => m.name === "midnight-indexer")?.state === "started";

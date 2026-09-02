@@ -21,6 +21,8 @@ import { FLY_REGIONS } from "@/lib/midnight/shared";
 import {
   provisionFullStack,
   checkFullStack,
+  stackDiagnostics,
+
   destroyFullStack,
   repairFullStack,
   repairIdentusOnly,
@@ -42,7 +44,6 @@ type ReadinessResult = {
     health: { probes: { name: string; ok: boolean; status: number | null; detail: string }[]; ready: boolean };
     status: string;
     ready: boolean;
-    logTail?: string | null;
     hasKey?: boolean;
     exists?: boolean | null;
   };
@@ -52,19 +53,26 @@ type ReadinessResult = {
     probes: { indexer: { ok: boolean; status: number | null; detail: string }; proof: { ok: boolean; status: number | null; detail: string }; blockHeight: number | null };
     status: string;
     ready: boolean;
-    diagnostics?: {
-      indexerLog: string | null;
-      nodeLog: string | null;
-      nodeRpcFromNode: string | null;
-      nodeRpcFromIndexer: string | null;
-      ips?: string | null;
-    } | null;
     exists?: boolean | null;
   };
 
   allReady: boolean;
   appPrefix: string;
 };
+
+/** Slow exec-based reads, fetched separately from the fast readiness check. */
+type DiagnosticsResult = {
+  logTail: string | null;
+  diagnostics: {
+    indexerLog: string | null;
+    nodeLog: string | null;
+    nodeRpcFromNode: string | null;
+    nodeRpcFromIndexer: string | null;
+    ips?: string | null;
+  } | null;
+  appPrefix: string;
+};
+
 
 export const Route = createFileRoute("/app/deploy")({
   head: () => ({
@@ -89,9 +97,10 @@ type StackSummary = {
   appPrefix: string;
   region: string;
   created_at: string;
-  identus?: { status: string; last_error: string | null; agent_url: string | null };
-  midnight?: { status: string; last_error: string | null; indexer_url: string | null; proof_url: string | null };
+  identus?: { status: string; last_error: string | null; agent_url: string | null; machines?: MachineLike[] };
+  midnight?: { status: string; last_error: string | null; indexer_url: string | null; proof_url: string | null; machines?: MachineLike[] };
 };
+
 
 function DeployConsole() {
   const qc = useQueryClient();
@@ -129,11 +138,15 @@ function DeployConsole() {
     [stacks, activePrefix],
   );
 
-  // Poll readiness for the selected stack while it is not ready.
+  // Poll readiness for the selected stack while it is not ready. `placeholderData`
+  // keeps the last good payload on screen when a poll fails, so a dropped check
+  // never redraws the timelines as a stack that has done nothing.
   const readiness = useQuery<ReadinessResult | null>({
     queryKey: ["stack_readiness", selected?.appPrefix],
     queryFn: async () => (selected ? ((await check({ data: { appPrefix: selected.appPrefix } })) as ReadinessResult) : null),
     enabled: Boolean(selected),
+    placeholderData: (prev) => prev,
+    retry: 1,
     refetchInterval: (q) => {
       const d = q.state.data as ReadinessResult | null;
       if (d && d.allReady) return false;
@@ -142,6 +155,27 @@ function DeployConsole() {
       return Date.now() - started > 10 * 60 * 1000 ? 20000 : 12000;
     },
   });
+
+  // Slow exec-based reads. They only matter once a half is known unhealthy, and
+  // they live in their own request so a hanging exec degrades to "no log
+  // captured" rather than killing the readiness poll.
+  const readDiagnostics = useServerFn(stackDiagnostics);
+  const needsIdentusLog = Boolean(readiness.data && !readiness.data.identus.ready && readiness.data.identus.exists !== false);
+  const needsMidnightLog = Boolean(readiness.data && !readiness.data.midnight.ready && readiness.data.midnight.exists !== false);
+  const diagnosticsQuery = useQuery<DiagnosticsResult | null>({
+    queryKey: ["stack_diagnostics", selected?.appPrefix, needsIdentusLog, needsMidnightLog],
+    queryFn: async () =>
+      selected
+        ? ((await readDiagnostics({
+            data: { appPrefix: selected.appPrefix, identus: needsIdentusLog, midnight: needsMidnightLog },
+          })) as DiagnosticsResult)
+        : null,
+    enabled: Boolean(selected) && (needsIdentusLog || needsMidnightLog),
+    placeholderData: (prev) => prev,
+    retry: false,
+    refetchInterval: 45000,
+  });
+
 
   const provisionMut = useMutation({
     mutationFn: () =>
@@ -289,8 +323,20 @@ function DeployConsole() {
               stack={selected}
               readiness={readiness.data}
               readinessLoading={readiness.isFetching}
+              checkError={
+                readiness.isError
+                  ? readiness.error instanceof Error
+                    ? readiness.error.message
+                    : "The readiness check failed"
+                  : null
+              }
+              diagnostics={diagnosticsQuery.data ?? null}
               checking={readiness.isFetching}
-              onCheck={() => void readiness.refetch()}
+              onCheck={() => {
+                void readiness.refetch();
+                void diagnosticsQuery.refetch();
+              }}
+
               onDestroy={() => destroyMut.mutate()}
               destroyLoading={destroyMut.isPending}
               onRepair={() => repairMut.mutate()}
@@ -425,6 +471,8 @@ function StackDetail({
   stack,
   readiness,
   readinessLoading,
+  checkError,
+  diagnostics: stackDiags,
   checking,
   onCheck,
   onDestroy,
@@ -444,6 +492,8 @@ function StackDetail({
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
   readinessLoading: boolean;
+  checkError: string | null;
+  diagnostics: DiagnosticsResult | null;
   checking: boolean;
   onCheck: () => void;
   onDestroy: () => void;
@@ -464,6 +514,12 @@ function StackDetail({
   const identus = readiness?.identus;
   const midnight = readiness?.midnight;
   const allReady = readiness?.allReady ?? false;
+  // No live payload and a failed check = we know nothing. Fall back to the last
+  // machine states persisted on the deployment row rather than an empty list.
+  const identusMachines = identus?.machines ?? stack.identus?.machines ?? undefined;
+  const midnightMachines = midnight?.machines ?? stack.midnight?.machines ?? undefined;
+  const checkFailed = Boolean(checkError && !readiness);
+
 
   return (
     <div className="space-y-4">
@@ -517,24 +573,40 @@ function StackDetail({
         </div>
       </div>
 
+      {checkError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+          <p className="font-medium">Couldn&apos;t reach the stack check.</p>
+          <p className="mt-1 break-words text-destructive/80">{checkError}</p>
+          <p className="mt-1 text-destructive/80">
+            The machines below show the last known state — this is not a sign that provisioning failed.
+          </p>
+          <Button variant="outline" size="sm" className="mt-2" onClick={onCheck} disabled={checking}>
+            {checking ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            Retry check
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {(() => {
           const identusStepList = identusSteps({
             appName: identus?.urls.appName ?? `${stack.appPrefix}-identus`,
-            machines: identus?.machines,
+            machines: identusMachines,
             probes: identus?.health.probes,
-            logTail: identus?.logTail ?? null,
+            logTail: stackDiags?.logTail ?? null,
             hasKey: identus?.hasKey ?? true,
             exists: identus?.exists ?? null,
+            checkFailed,
           });
           const midnightStepList = midnightSteps({
             appName: midnight?.urls.appName ?? `${stack.appPrefix}-midnight`,
-            machines: midnight?.machines,
+            machines: midnightMachines,
             probes: midnight?.probes,
-            diagnostics: midnight?.diagnostics ?? null,
+            diagnostics: stackDiags?.diagnostics ?? null,
             exists: midnight?.exists ?? null,
+            checkFailed,
           });
+
           const identusAbsent = identus?.exists === false && isNotProvisioned(identusStepList);
           const midnightAbsent = midnight?.exists === false && isNotProvisioned(midnightStepList);
           return (
@@ -542,7 +614,7 @@ function StackDetail({
               <HalfCard
                 title="Identus Cloud Agent"
                 subtitle="Credential issuance"
-                status={identusAbsent ? "not provisioned" : identus?.status ?? stack.identus?.status ?? "unknown"}
+                status={identusAbsent ? "not provisioned" : checkFailed ? "unknown" : identus?.status ?? stack.identus?.status ?? "unknown"}
                 ready={identus?.ready ?? false}
                 loading={readinessLoading}
                 // A derived URL for an app that does not exist is a dead link.
@@ -551,7 +623,7 @@ function StackDetail({
                 error={stack.identus?.last_error}
                 readyTo={allReady ? "/app/identus" : null}
                 readyLabel="Publish DID & issue"
-                machines={identus?.machines}
+                machines={identusMachines}
                 steps={identusStepList}
                 startedAt={identusAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
@@ -565,7 +637,7 @@ function StackDetail({
               <HalfCard
                 title="Midnight Undeployed"
                 subtitle="On-chain anchoring"
-                status={midnightAbsent ? "not provisioned" : midnight?.status ?? stack.midnight?.status ?? "unknown"}
+                status={midnightAbsent ? "not provisioned" : checkFailed ? "unknown" : midnight?.status ?? stack.midnight?.status ?? "unknown"}
                 ready={midnight?.ready ?? false}
                 loading={readinessLoading}
                 url={midnightAbsent ? null : midnight?.urls.indexerUrl ?? stack.midnight?.indexer_url ?? null}
@@ -573,7 +645,7 @@ function StackDetail({
                 error={stack.midnight?.last_error}
                 readyTo={allReady ? "/app/midnight" : null}
                 readyLabel="Deploy contract & anchor"
-                machines={midnight?.machines}
+                machines={midnightMachines}
                 steps={midnightStepList}
                 startedAt={midnightAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
