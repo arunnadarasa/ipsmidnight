@@ -475,36 +475,66 @@ function pickErrorText(raw: string): string | null {
 
 
 
+export type AgentBootLog = {
+  /** One-line-ish diagnosis for the timeline step. */
+  summary: string | null;
+  /** The raw tail (current boot plus the two previous ones), for the drawer. */
+  raw: string | null;
+  /** Where the text came from, or why nothing could be read. */
+  source: "boot-log" | "app-log-api" | "health-check" | "exit-event" | "unavailable";
+  reason: string | null;
+};
+
 /**
  * The agent's own error text. The Machines API exposes no log endpoint, so the
- * primary source is the boot log file written by `AGENT_INIT_EXEC`, read back
- * through `machines/:id/exec`. Falls back to the legacy app log API, then to the
- * machine's health-check output. Every failure degrades to a short explanation
- * instead of null so the UI never shows a silent spinner.
+ * primary source is the boot log file written by `AGENT_INIT_EXEC` onto the
+ * agent's volume, read back through `machines/:id/exec`. Because the wrapper
+ * rotates the file per boot and holds a crashed machine open, the *failing*
+ * boot is still readable. Falls back to the legacy app log API, then to the
+ * machine's health-check output, then to the exit event — and always explains
+ * itself rather than returning a bare null the UI cannot narrate.
  */
-export async function agentLogTail(appName: string): Promise<string | null> {
-  if (!flyConfigured()) return null;
+export async function agentBootLog(appName: string): Promise<AgentBootLog> {
+  const none = (source: AgentBootLog["source"], reason: string | null): AgentBootLog => ({
+    summary: reason,
+    raw: null,
+    source,
+    reason,
+  });
+  if (!flyConfigured()) return none("unavailable", null);
   try {
     const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
     const agent = machines.find((m) => m.name === "identus-cloud-agent");
-    if (!agent) return null;
+    if (!agent) return none("unavailable", null);
 
-    // 1. Boot log file inside the machine (works while the machine is running).
+    // 1. Boot logs on the volume: current boot first, then the two before it.
+    let execFailed = false;
     try {
+      const files = [AGENT_LOG_PATH, ...AGENT_LOG_HISTORY];
+      const script = files
+        .map((f) => `if [ -s ${f} ]; then echo "===== ${f}"; tail -c 3000 ${f}; echo; fi`)
+        .join("; ");
       const exec = await flyOptional<{ exit_code?: number; stdout?: string; stderr?: string }>(
         `/apps/${appName}/machines/${agent.id}/exec`,
         {
           method: "POST",
-          body: JSON.stringify({
-            command: ["/bin/sh", "-c", `tail -c 4000 ${AGENT_LOG_PATH} 2>/dev/null`],
-            timeout: 20,
-          }),
+          body: JSON.stringify({ command: ["/bin/sh", "-c", script], timeout: 20 }),
         },
       );
-      const text = pickErrorText(`${exec?.stdout ?? ""}\n${exec?.stderr ?? ""}`);
-      if (text) return text;
+      const raw = `${exec?.stdout ?? ""}\n${exec?.stderr ?? ""}`.trim();
+      if (raw) {
+        // Diagnose against the failing boot: the section carrying the exit marker
+        // if there is one, otherwise the whole tail.
+        const sections = raw.split(/^===== /m).filter((s) => s.trim());
+        const failing = sections.find((s) => s.includes(AGENT_EXIT_MARKER) && !/AGENT_EXIT=0\b/.test(s));
+        const summary = pickErrorText(failing ?? raw);
+        if (summary) {
+          return { summary, raw: raw.slice(-9000), source: "boot-log", reason: null };
+        }
+      }
     } catch {
-      // exec is unavailable while the machine is stopped/restarting — fall through
+      // exec is unavailable while the machine is stopped/restarting.
+      execFailed = true;
     }
 
     // 2. Legacy app log API (works with org-scoped tokens only).
@@ -515,26 +545,38 @@ export async function agentLogTail(appName: string): Promise<string | null> {
       });
       if (res.ok) {
         const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
-        const text = pickErrorText((json.data ?? []).map((d) => d.attributes?.message ?? "").join("\n"));
-        if (text) return text;
+        const raw = (json.data ?? []).map((d) => d.attributes?.message ?? "").join("\n").trim();
+        const summary = pickErrorText(raw);
+        if (summary) return { summary, raw: raw.slice(-9000), source: "app-log-api", reason: null };
       }
     } catch {
       // ignore
     }
 
-    // 3. Health-check output, plus the exit summary as a last resort.
+    // 3. Health-check output, then the exit event.
     const detail = (await flyOptional<FlyMachine>(`/apps/${appName}/machines/${agent.id}`)) ?? agent;
     const checkOutput = (detail.checks ?? [])
       .map((c) => (c.output ?? "").trim())
       .filter(Boolean)
       .join(" | ");
-    if (checkOutput) return checkOutput.slice(0, 400);
+    if (checkOutput) {
+      return { summary: checkOutput.slice(0, 400), raw: checkOutput.slice(0, 4000), source: "health-check", reason: null };
+    }
     const exit = exitSummary(detail);
-    if (exit.detail) return `${exit.detail} No log line captured yet — the boot log appears after the next restart.`;
-    return null;
+    const restarting = execFailed || detail.state !== "started";
+    const reason = restarting
+      ? `The agent machine is ${detail.state} — its boot log can only be read while it is running. Retry the check in a few seconds.`
+      : "No error line in the boot log yet.";
+    if (exit.detail) return { summary: `${exit.detail} ${reason}`, raw: null, source: "exit-event", reason };
+    return none(restarting ? "unavailable" : "boot-log", restarting ? reason : null);
   } catch {
-    return null;
+    return none("unavailable", null);
   }
+}
+
+/** Back-compat single-string view used by the readiness timeline. */
+export async function agentLogTail(appName: string): Promise<string | null> {
+  return (await agentBootLog(appName)).summary;
 }
 
 
