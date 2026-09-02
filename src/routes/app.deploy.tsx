@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, CheckCircle2, Cloud, ExternalLink, Loader2, RefreshCw, Rocket, Trash2, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Cloud, Copy, ExternalLink, Loader2, RefreshCw, Rocket, Trash2, Wrench } from "lucide-react";
 import { SectionHeading, Panel } from "@/components/SectionHeading";
 import { StatusDot, TruncatedMono } from "@/components/MonoValue";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,13 @@ type ReadinessResult = {
 /** Slow exec-based reads, fetched separately from the fast readiness check. */
 type DiagnosticsResult = {
   logTail: string | null;
+  /** Full boot-log tail plus why it is (or isn't) available. */
+  agentLog?: {
+    summary: string | null;
+    raw: string | null;
+    source: string;
+    reason: string | null;
+  } | null;
   diagnostics: {
     indexerLog: string | null;
     nodeLog: string | null;
@@ -625,6 +632,7 @@ function StackDetail({
                 readyLabel="Publish DID & issue"
                 machines={identusMachines}
                 steps={identusStepList}
+                bootLog={identusAbsent ? null : stackDiags?.agentLog ?? null}
                 startedAt={identusAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
                 onRetry={onCheck}
@@ -696,6 +704,7 @@ function HalfCard({
   readyLabel,
   machines,
   steps,
+  bootLog,
   startedAt,
   regionLabel,
   onRetry,
@@ -717,6 +726,8 @@ function HalfCard({
   readyLabel: string;
   machines?: MachineLike[] | undefined;
   steps: StackStep[];
+  /** Full boot-log tail for this half, when one was captured. */
+  bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
   startedAt: string | null;
   regionLabel?: string | null;
   onRetry?: () => void;
@@ -728,6 +739,9 @@ function HalfCard({
   provisionLabel?: string;
 }) {
   const tone = ready ? "text-success" : status === "error" ? "text-destructive" : "text-muted-foreground";
+  // Machines left behind by an earlier repair can confuse the private-DNS
+  // picture, so name them instead of letting them sit silently in the drawer.
+  const stray = (machines ?? []).filter((m) => m.state === "stopped" || m.state === "failed");
   return (
     <Panel
       title={title}
@@ -785,6 +799,34 @@ function HalfCard({
         )}
 
 
+        {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (
+          <details className="rounded-xl border border-border bg-card/60 px-2.5 py-1.5">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Boot log</summary>
+            {bootLog.raw ? (
+              <>
+                <div className="mt-1.5 flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(bootLog.raw ?? "");
+                      toast.success("Copied.");
+                    }}
+                  >
+                    <Copy className="mr-1 h-3 w-3" /> Copy log
+                  </Button>
+                </div>
+                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                  {bootLog.raw}
+                </pre>
+              </>
+            ) : (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">{bootLog.reason}</p>
+            )}
+          </details>
+        ) : null}
+
         {machines?.length ? (
           <details className="rounded-xl border border-border bg-card/60 transition-colors hover:border-primary/40 px-2.5 py-1.5">
             <summary className="cursor-pointer text-[11px] text-muted-foreground">Fly machines ({machines.length})</summary>
@@ -796,6 +838,13 @@ function HalfCard({
                 </li>
               ))}
             </ul>
+            {stray.length ? (
+              <p className="mt-2 text-[11px] text-warning">
+                {stray.length === 1 ? "1 machine is" : `${stray.length} machines are`} stopped or failed (
+                {stray.map((m) => m.name).join(", ")}). Leftovers from an earlier repair can sit in the same private-DNS
+                process group — run Repair if this half stays unhealthy.
+              </p>
+            ) : null}
           </details>
         ) : null}
 

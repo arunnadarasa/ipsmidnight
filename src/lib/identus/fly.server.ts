@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
   AGENT_INIT_EXEC,
+  AGENT_EXIT_MARKER,
+  AGENT_LOG_DIR,
+  AGENT_LOG_HISTORY,
   AGENT_LOG_PATH,
+  AGENT_LOG_VOLUME,
   IDENTUS_IMAGES,
   JAVA_TOOL_OPTIONS,
   postgresInitSql,
@@ -21,7 +25,11 @@ type FlyMachine = {
   name: string;
   state: string;
   region?: string;
-  config?: { env?: Record<string, string>; services?: { internal_port: number }[] };
+  config?: {
+    env?: Record<string, string>;
+    services?: { internal_port: number }[];
+    mounts?: { volume?: string; path?: string }[];
+  };
   checks?: { name: string; status: string; output?: string }[];
   events?: FlyEvent[];
 };
@@ -124,7 +132,28 @@ export function mintAdminKey() {
 
 type MachineKind = "postgres" | "prism-node" | "cloud-agent";
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
+/**
+ * Reuses the agent's log volume in the region or creates it. Returns null on
+ * failure so a missing volume degrades to an ephemeral log rather than blocking
+ * provisioning altogether.
+ */
+async function ensureLogVolume(appName: string, region: string): Promise<string | null> {
+  try {
+    const volumes =
+      (await flyOptional<{ id: string; name: string; region: string }[]>(`/apps/${appName}/volumes`)) ?? [];
+    const existing = volumes.find((v) => v.name === AGENT_LOG_VOLUME && v.region === region);
+    if (existing) return existing.id;
+    const created = await fly<{ id: string }>(`/apps/${appName}/volumes`, {
+      method: "POST",
+      body: JSON.stringify({ name: AGENT_LOG_VOLUME, region, size_gb: 1 }),
+    });
+    return created.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVolumeId?: string | null) {
   // Unique per Fly app: tenants share one Fly organisation/private network, so a
   // shared password would let any reachable machine open another tenant's DB.
   const db = identusDbCreds(appName);
@@ -210,8 +239,11 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
         DIDCOMM_SERVICE_URL: urls.didcommUrl,
         JAVA_TOOL_OPTIONS,
       },
-      // Capture the agent's stdout to a file we can read back over exec.
+      // Capture the agent's stdout to a file we can read back over exec. The
+      // volume keeps that file across the restart that follows a crash — without
+      // it the failing boot's log is gone before anything can read it.
       init: { exec: [...AGENT_INIT_EXEC] },
+      ...(logVolumeId ? { mounts: [{ volume: logVolumeId, path: AGENT_LOG_DIR }] } : {}),
       guest: { cpu_kind: "performance", cpus: 2, memory_mb: 4096 },
 
       services: [
@@ -263,12 +295,25 @@ function machineBody(spec: { name: string; config: Record<string, unknown> }, re
   });
 }
 
+/** True when the running machine is missing the log volume the spec now wants. */
+function needsLogVolume(existing: FlyMachine, logVolumeId: string | null) {
+  if (!logVolumeId) return false;
+  return !(existing.config?.mounts ?? []).some((m) => m.path === AGENT_LOG_DIR);
+}
+
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
-  const spec = machineSpec(kind, appName, adminKey);
+  const logVolumeId = kind === "cloud-agent" ? await ensureLogVolume(appName, region) : null;
+  const spec = machineSpec(kind, appName, adminKey, logVolumeId);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
   if (existing) {
+    // A mount can only be attached by replacing the machine. Only agent-internal
+    // state lives on the agent machine, so recreating it is safe.
+    if (needsLogVolume(existing, logVolumeId)) {
+      await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
+      return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
+    }
     await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
     return { ...existing, state: "updating" };
   }
@@ -285,23 +330,30 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
  * column name) needs a fresh data directory anyway. Only agent-internal state
  * lives there (no patient summaries or issued credentials), and the Midnight app
  * is never touched by this call.
-
+ *
+ * The cloud agent is recreated too when it is still missing the boot-log volume:
+ * a mount cannot be added to a live machine, and without it every crash-loop
+ * reads back as "the machine hasn't started" instead of the JVM exception.
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const logVolumeId = await ensureLogVolume(appName, region);
   const repaired: string[] = [];
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey);
+    const spec = machineSpec(kind, appName, adminKey, kind === "cloud-agent" ? logVolumeId : null);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
-    const recreate = kind === "postgres";
+    const recreate =
+      kind === "postgres" || (kind === "cloud-agent" && existing && needsLogVolume(existing, logVolumeId));
     if (existing && recreate) {
       // 404 means it is already gone — either way we continue to the create below.
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
       const fresh = await fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
       // Let Postgres finish initdb before the agent is restarted against it,
       // otherwise the agent burns its first boot on "connection refused".
-      await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
+      if (kind === "postgres") {
+        await flyOptional(`/apps/${appName}/machines/${fresh.id}/wait?state=started&timeout=60`);
+      }
     } else if (existing) {
       await fly(`/apps/${appName}/machines/${existing.id}`, { method: "POST", body });
       await flyOptional(`/apps/${appName}/machines/${existing.id}/restart`, { method: "POST" });
@@ -423,36 +475,66 @@ function pickErrorText(raw: string): string | null {
 
 
 
+export type AgentBootLog = {
+  /** One-line-ish diagnosis for the timeline step. */
+  summary: string | null;
+  /** The raw tail (current boot plus the two previous ones), for the drawer. */
+  raw: string | null;
+  /** Where the text came from, or why nothing could be read. */
+  source: "boot-log" | "app-log-api" | "health-check" | "exit-event" | "unavailable";
+  reason: string | null;
+};
+
 /**
  * The agent's own error text. The Machines API exposes no log endpoint, so the
- * primary source is the boot log file written by `AGENT_INIT_EXEC`, read back
- * through `machines/:id/exec`. Falls back to the legacy app log API, then to the
- * machine's health-check output. Every failure degrades to a short explanation
- * instead of null so the UI never shows a silent spinner.
+ * primary source is the boot log file written by `AGENT_INIT_EXEC` onto the
+ * agent's volume, read back through `machines/:id/exec`. Because the wrapper
+ * rotates the file per boot and holds a crashed machine open, the *failing*
+ * boot is still readable. Falls back to the legacy app log API, then to the
+ * machine's health-check output, then to the exit event — and always explains
+ * itself rather than returning a bare null the UI cannot narrate.
  */
-export async function agentLogTail(appName: string): Promise<string | null> {
-  if (!flyConfigured()) return null;
+export async function agentBootLog(appName: string): Promise<AgentBootLog> {
+  const none = (source: AgentBootLog["source"], reason: string | null): AgentBootLog => ({
+    summary: reason,
+    raw: null,
+    source,
+    reason,
+  });
+  if (!flyConfigured()) return none("unavailable", null);
   try {
     const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
     const agent = machines.find((m) => m.name === "identus-cloud-agent");
-    if (!agent) return null;
+    if (!agent) return none("unavailable", null);
 
-    // 1. Boot log file inside the machine (works while the machine is running).
+    // 1. Boot logs on the volume: current boot first, then the two before it.
+    let execFailed = false;
     try {
+      const files = [AGENT_LOG_PATH, ...AGENT_LOG_HISTORY];
+      const script = files
+        .map((f) => `if [ -s ${f} ]; then echo "===== ${f}"; tail -c 3000 ${f}; echo; fi`)
+        .join("; ");
       const exec = await flyOptional<{ exit_code?: number; stdout?: string; stderr?: string }>(
         `/apps/${appName}/machines/${agent.id}/exec`,
         {
           method: "POST",
-          body: JSON.stringify({
-            command: ["/bin/sh", "-c", `tail -c 4000 ${AGENT_LOG_PATH} 2>/dev/null`],
-            timeout: 20,
-          }),
+          body: JSON.stringify({ command: ["/bin/sh", "-c", script], timeout: 20 }),
         },
       );
-      const text = pickErrorText(`${exec?.stdout ?? ""}\n${exec?.stderr ?? ""}`);
-      if (text) return text;
+      const raw = `${exec?.stdout ?? ""}\n${exec?.stderr ?? ""}`.trim();
+      if (raw) {
+        // Diagnose against the failing boot: the section carrying the exit marker
+        // if there is one, otherwise the whole tail.
+        const sections = raw.split(/^===== /m).filter((s) => s.trim());
+        const failing = sections.find((s) => s.includes(AGENT_EXIT_MARKER) && !/AGENT_EXIT=0\b/.test(s));
+        const summary = pickErrorText(failing ?? raw);
+        if (summary) {
+          return { summary, raw: raw.slice(-9000), source: "boot-log", reason: null };
+        }
+      }
     } catch {
-      // exec is unavailable while the machine is stopped/restarting — fall through
+      // exec is unavailable while the machine is stopped/restarting.
+      execFailed = true;
     }
 
     // 2. Legacy app log API (works with org-scoped tokens only).
@@ -463,26 +545,38 @@ export async function agentLogTail(appName: string): Promise<string | null> {
       });
       if (res.ok) {
         const json = (await res.json()) as { data?: { attributes?: { message?: string } }[] };
-        const text = pickErrorText((json.data ?? []).map((d) => d.attributes?.message ?? "").join("\n"));
-        if (text) return text;
+        const raw = (json.data ?? []).map((d) => d.attributes?.message ?? "").join("\n").trim();
+        const summary = pickErrorText(raw);
+        if (summary) return { summary, raw: raw.slice(-9000), source: "app-log-api", reason: null };
       }
     } catch {
       // ignore
     }
 
-    // 3. Health-check output, plus the exit summary as a last resort.
+    // 3. Health-check output, then the exit event.
     const detail = (await flyOptional<FlyMachine>(`/apps/${appName}/machines/${agent.id}`)) ?? agent;
     const checkOutput = (detail.checks ?? [])
       .map((c) => (c.output ?? "").trim())
       .filter(Boolean)
       .join(" | ");
-    if (checkOutput) return checkOutput.slice(0, 400);
+    if (checkOutput) {
+      return { summary: checkOutput.slice(0, 400), raw: checkOutput.slice(0, 4000), source: "health-check", reason: null };
+    }
     const exit = exitSummary(detail);
-    if (exit.detail) return `${exit.detail} No log line captured yet — the boot log appears after the next restart.`;
-    return null;
+    const restarting = execFailed || detail.state !== "started";
+    const reason = restarting
+      ? `The agent machine is ${detail.state} — its boot log can only be read while it is running. Retry the check in a few seconds.`
+      : "No error line in the boot log yet.";
+    if (exit.detail) return { summary: `${exit.detail} ${reason}`, raw: null, source: "exit-event", reason };
+    return none(restarting ? "unavailable" : "boot-log", restarting ? reason : null);
   } catch {
-    return null;
+    return none("unavailable", null);
   }
+}
+
+/** Back-compat single-string view used by the readiness timeline. */
+export async function agentLogTail(appName: string): Promise<string | null> {
+  return (await agentBootLog(appName)).summary;
 }
 
 

@@ -69,8 +69,31 @@ export const AGENT_MACHINES = ["identus-postgres", "identus-prism-node", "identu
 /** Image entrypoint of `identus/identus-cloud-agent` (sbt-native-packager layout). */
 export const AGENT_ENTRYPOINT = "/opt/docker/bin/identus-cloud-agent";
 
-/** Where the boot wrapper tees the agent's stdout/stderr inside the machine. */
-export const AGENT_LOG_PATH = "/tmp/agent-boot.log";
+/**
+ * Where the boot wrapper tees the agent's stdout/stderr inside the machine.
+ *
+ * This lives on a mounted volume, not in `/tmp`: the boot that actually fails is
+ * the one we need to read, and a machine-local path is wiped by the restart that
+ * follows the crash — leaving the console with "the machine hasn't started" and
+ * no error text at all.
+ */
+export const AGENT_LOG_DIR = "/var/log/identus";
+export const AGENT_LOG_PATH = `${AGENT_LOG_DIR}/agent-boot.log`;
+/** Previous boots, kept so a crash-loop still shows the first failing boot. */
+export const AGENT_LOG_HISTORY = [`${AGENT_LOG_PATH}.1`, `${AGENT_LOG_PATH}.2`] as const;
+
+/** Fly volume that carries {@link AGENT_LOG_DIR}. */
+export const AGENT_LOG_VOLUME = "identus_agent_log";
+
+/**
+ * Seconds the machine idles after a non-zero exit before handing the exit code
+ * back to Fly. `exec` only works against a running machine, so without this hold
+ * every log read races the restart and returns nothing.
+ */
+export const AGENT_CRASH_HOLD_SECONDS = 600;
+
+/** Marker the wrapper writes into the log when the JVM exits. */
+export const AGENT_EXIT_MARKER = "AGENT_EXIT=";
 
 /**
  * Boot wrapper for the cloud agent. Fly's Machines API exposes no log endpoint,
@@ -78,10 +101,20 @@ export const AGENT_LOG_PATH = "/tmp/agent-boot.log";
  * `machines/:id/exec` — that file is the only way to see the JVM exception that
  * kills the process. `tail -F` keeps the live Fly log stream intact and the
  * explicit `exit $c` preserves the real exit code (a pipe would mask it).
+ *
+ * On a non-zero exit the wrapper holds the machine open for
+ * {@link AGENT_CRASH_HOLD_SECONDS} so the log is readable, then exits with the
+ * real code so Fly's restart policy and the exit events stay truthful.
  */
 export const AGENT_INIT_EXEC = [
   "/bin/sh",
   "-c",
-  `touch ${AGENT_LOG_PATH}; tail -n +1 -F ${AGENT_LOG_PATH} & ` +
-    `${AGENT_ENTRYPOINT} >> ${AGENT_LOG_PATH} 2>&1; c=$?; sleep 1; exit $c`,
+  `mkdir -p ${AGENT_LOG_DIR}; ` +
+    `if [ -f ${AGENT_LOG_HISTORY[0]} ]; then mv -f ${AGENT_LOG_HISTORY[0]} ${AGENT_LOG_HISTORY[1]}; fi; ` +
+    `if [ -f ${AGENT_LOG_PATH} ]; then mv -f ${AGENT_LOG_PATH} ${AGENT_LOG_HISTORY[0]}; fi; ` +
+    `: > ${AGENT_LOG_PATH}; tail -n +1 -F ${AGENT_LOG_PATH} & ` +
+    `${AGENT_ENTRYPOINT} >> ${AGENT_LOG_PATH} 2>&1; c=$?; ` +
+    `echo "${AGENT_EXIT_MARKER}$c" >> ${AGENT_LOG_PATH}; ` +
+    `if [ "$c" != "0" ]; then sleep ${AGENT_CRASH_HOLD_SECONDS}; else sleep 1; fi; exit $c`,
 ] as const;
+

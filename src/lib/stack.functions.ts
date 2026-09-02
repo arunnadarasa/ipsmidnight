@@ -373,17 +373,24 @@ export const stackDiagnostics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { appPrefix: string; identus?: boolean; midnight?: boolean }) => input)
   .handler(async ({ data }) => {
-    const { agentLogTail } = await import("@/lib/identus/fly.server");
+    const { agentBootLog } = await import("@/lib/identus/fly.server");
     const { midnightDiagnostics } = await import("@/lib/midnight/fly.server");
 
     const identusApp = `${data.appPrefix}-identus`;
     const midnightApp = `${data.appPrefix}-midnight`;
     const EXEC_TIMEOUT = 20000;
 
-    const [logTail, diagnostics] = await Promise.all([
+    const emptyLog = {
+      summary: null,
+      raw: null,
+      source: "unavailable" as const,
+      reason: null,
+    };
+
+    const [agentLog, diagnostics] = await Promise.all([
       data.identus === false
-        ? Promise.resolve(null)
-        : withTimeout(agentLogTail(identusApp), EXEC_TIMEOUT, null as string | null),
+        ? Promise.resolve(emptyLog)
+        : withTimeout(agentBootLog(identusApp), EXEC_TIMEOUT, emptyLog as Awaited<ReturnType<typeof agentBootLog>>),
       data.midnight === false
         ? Promise.resolve(null)
         : withTimeout(
@@ -393,7 +400,7 @@ export const stackDiagnostics = createServerFn({ method: "POST" })
           ),
     ]);
 
-    return { logTail, diagnostics, appPrefix: data.appPrefix };
+    return { logTail: agentLog.summary, agentLog, diagnostics, appPrefix: data.appPrefix };
   });
 
 
