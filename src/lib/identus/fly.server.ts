@@ -205,7 +205,10 @@ async function machineSpec(kind: MachineKind, appName: string, adminKey: string,
           POSTGRES_USER: db.user,
           POSTGRES_PASSWORD: db.password,
           POSTGRES_DB: "postgres",
+          // Pin host auth to the same scheme the role passwords are stored with.
+          ...POSTGRES_AUTH_ENV,
         },
+
         files: [{ guest_path: "/docker-entrypoint-initdb.d/00-init.sql", raw_value: b64(postgresInitSql(db.appRolePassword)) }],
         guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
         // Postgres is reached over 6PN only — declaring a service here is what
