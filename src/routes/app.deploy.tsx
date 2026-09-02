@@ -323,8 +323,20 @@ function DeployConsole() {
               stack={selected}
               readiness={readiness.data}
               readinessLoading={readiness.isFetching}
+              checkError={
+                readiness.isError
+                  ? readiness.error instanceof Error
+                    ? readiness.error.message
+                    : "The readiness check failed"
+                  : null
+              }
+              diagnostics={diagnosticsQuery.data ?? null}
               checking={readiness.isFetching}
-              onCheck={() => void readiness.refetch()}
+              onCheck={() => {
+                void readiness.refetch();
+                void diagnosticsQuery.refetch();
+              }}
+
               onDestroy={() => destroyMut.mutate()}
               destroyLoading={destroyMut.isPending}
               onRepair={() => repairMut.mutate()}
