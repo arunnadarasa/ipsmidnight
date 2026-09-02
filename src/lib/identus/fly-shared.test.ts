@@ -26,5 +26,27 @@ describe("Identus database configuration", () => {
       assert.ok(sql.includes(`GRANT USAGE, CREATE ON SCHEMA public TO "${database}-application-user"`));
       assert.ok(sql.includes(`GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${database}-application-user"`));
     }
+
+  test("resets every application role in place with an escaped password", () => {
+    const sql = resetAppRolesSql("safe'password");
+    for (const role of ["pollux", "connect", "agent"]) {
+      assert.ok(sql.includes(`ALTER ROLE "${role}-application-user" WITH LOGIN PASSWORD 'safe''password';`));
+    }
+  });
+
+  test("probe script logs in over TCP as the agent's own role", () => {
+    const script = postgresProbeScript("safe'password");
+    assert.ok(script.includes("ROLES="));
+    assert.ok(script.includes("AUTH="));
+    assert.ok(script.includes("-h 127.0.0.1 -U pollux-application-user"));
+    // Shell-escaped, so the quote cannot break out of the assignment.
+    assert.ok(script.includes(`PGPASSWORD='safe'\\''password'`));
+  });
+
+  test("reset script creates missing roles before altering them", () => {
+    const script = postgresResetScript("pw");
+    assert.ok(script.includes(`CREATE ROLE "pollux-application-user" LOGIN PASSWORD 'pw'`));
+    assert.ok(script.includes(`ALTER ROLE "agent-application-user" WITH LOGIN PASSWORD 'pw';`));
+    assert.ok(script.includes("RESET="));
   });
 });
