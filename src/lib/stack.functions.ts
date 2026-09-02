@@ -170,15 +170,56 @@ export const provisionHalf = createServerFn({ method: "POST" })
     return { ok: true, appName: result.appName };
   });
 
-/** Combined readiness check for both halves of an IPS stack. */
+/**
+ * Resolves to `fallback` when `promise` has not settled within `ms`, so one
+ * hanging Fly call can never take the whole readiness response down with it.
+ * A torn-down request is worse than a partial answer: the UI cannot tell the
+ * difference between "check failed" and "nothing has happened yet".
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(fallback);
+      }
+    }, ms);
+    promise
+      .then((value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      })
+      .catch(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(fallback);
+        }
+      });
+  });
+}
+
+/**
+ * Combined readiness check for both halves of an IPS stack.
+ *
+ * Fast signals only — app existence, machine states and the HTTP health probes.
+ * The expensive exec-based reads (agent log tail, indexer/node diagnostics) live
+ * in `stackDiagnostics` because running them here made the whole request exceed
+ * its budget and get torn down, which the console then rendered as a stack with
+ * zero completed steps.
+ */
 export const checkFullStack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { appPrefix: string }) => input)
   .handler(async ({ data, context }) => {
-    const { identusMachineStates, agentLogTail, identusAppExists } = await import("@/lib/identus/fly.server");
+    const { identusMachineStates, identusAppExists } = await import("@/lib/identus/fly.server");
     const { probeAgent } = await import("@/lib/identus/cloud-agent.server");
     const { identusStackUrls } = await import("@/lib/identus/fly-shared");
-    const { machineStates, probeStack, midnightDiagnostics, appExists } = await import("@/lib/midnight/fly.server");
+    const { machineStates, probeStack, appExists } = await import("@/lib/midnight/fly.server");
     const { stackUrls } = await import("@/lib/midnight/shared");
 
     const { supabase, userId } = context;
@@ -198,23 +239,35 @@ export const checkFullStack = createServerFn({ method: "POST" })
     // (or one whose Fly app is actually there).
     const hasRow = (kind: string) => Boolean(rows?.some((r) => r.kind === kind));
 
-    // Identus half
     const { data: conn } = await supabase
       .from("agent_connections")
       .select("id,api_key")
       .eq("user_id", userId)
       .eq("app_prefix", data.appPrefix)
       .maybeSingle();
-    // Each remote read is individually fault-tolerant: one slow or failing Fly
-    // call must not take down the whole check (that is what left the timeline
-    // spinning with no error).
-    const identusMachines = await identusMachineStates(identusUrls.appName).catch(() => []);
-    // A definite 404 on the app is what separates "not provisioned" from
-    // "provisioning" — the app *name* always exists, so it proves nothing.
-    const identusExists = await identusAppExists(identusUrls.appName);
-    const identusHealth = conn?.api_key
-      ? await probeAgent({ baseUrl: identusUrls.agentUrl, apiKey: conn.api_key }).catch(() => ({ probes: [], ready: false }))
-      : { probes: [], ready: false };
+
+    // Both halves are read concurrently, and every remote read is individually
+    // fault-tolerant and time-bounded: one slow or failing Fly call must not
+    // take down the whole check (that is what left the timeline spinning).
+    const FLY_TIMEOUT = 8000;
+    const PROBE_TIMEOUT = 10000;
+
+    const [identusMachines, identusExists, identusHealth, midnightMachines, midnightExists] = await Promise.all([
+      withTimeout(identusMachineStates(identusUrls.appName), FLY_TIMEOUT, [] as Awaited<ReturnType<typeof identusMachineStates>>),
+      // A definite 404 on the app is what separates "not provisioned" from
+      // "provisioning" — the app *name* always exists, so it proves nothing.
+      withTimeout(identusAppExists(identusUrls.appName), FLY_TIMEOUT, null as boolean | null),
+      conn?.api_key
+        ? withTimeout(
+            probeAgent({ baseUrl: identusUrls.agentUrl, apiKey: conn.api_key }),
+            PROBE_TIMEOUT,
+            { probes: [], ready: false } as Awaited<ReturnType<typeof probeAgent>>,
+          )
+        : Promise.resolve({ probes: [], ready: false } as Awaited<ReturnType<typeof probeAgent>>),
+      withTimeout(machineStates(midnightUrls.appName), FLY_TIMEOUT, [] as Awaited<ReturnType<typeof machineStates>>),
+      withTimeout(appExists(midnightUrls.appName), FLY_TIMEOUT, null as boolean | null),
+    ]);
+
     const identusStatus = identusHealth.ready
       ? "ready"
       : identusMachines.length
@@ -222,10 +275,6 @@ export const checkFullStack = createServerFn({ method: "POST" })
         : identusExists === false
           ? "absent"
           : "unknown";
-    // Only pull logs when something is wrong — that is the one moment the
-    // stack trace matters, and it keeps the happy-path check fast.
-    const identusLog =
-      identusHealth.ready || identusExists === false ? null : await agentLogTail(identusUrls.appName).catch(() => null);
 
     if (hasRow("identus") || identusExists !== false) {
       await supabase.from("fly_deployments").upsert(
@@ -249,13 +298,18 @@ export const checkFullStack = createServerFn({ method: "POST" })
         .eq("id", conn.id);
     }
 
-    // Midnight half
-    const midnightMachines = await machineStates(midnightUrls.appName).catch(() => []);
-    const midnightExists = await appExists(midnightUrls.appName);
     const midnightProbes =
       midnightExists === false
-        ? { indexer: { ok: false, detail: "Fly app does not exist", blockHeight: null }, proof: { ok: false, detail: "Fly app does not exist" }, node: { ok: false, detail: "Fly app does not exist" } }
-        : await probeStack({ indexerUrl: midnightUrls.indexerUrl, proofUrl: midnightUrls.proofUrl });
+        ? { indexer: { ok: false, status: null, detail: "Fly app does not exist", blockHeight: null }, proof: { ok: false, status: null, detail: "Fly app does not exist" }, node: { ok: false, status: null, detail: "Fly app does not exist" } }
+        : await withTimeout(
+            probeStack({ indexerUrl: midnightUrls.indexerUrl, proofUrl: midnightUrls.proofUrl }),
+            PROBE_TIMEOUT,
+            {
+              indexer: { ok: false, status: null, detail: "indexer probe timed out", blockHeight: null },
+              proof: { ok: false, status: null, detail: "proof probe timed out" },
+              node: { ok: false, status: null, detail: "node probe timed out" },
+            } as never,
+          );
 
     const midnightReady = midnightProbes.indexer.ok && midnightProbes.proof.ok;
     const midnightStatus = midnightReady
@@ -265,10 +319,6 @@ export const checkFullStack = createServerFn({ method: "POST" })
         : midnightExists === false
           ? "absent"
           : "unknown";
-    // Only when something is wrong: the indexer log plus the node-RPC reachability
-    // check are the only signals that explain an indexer with zero blocks.
-    const midnightDiag =
-      midnightReady || midnightExists === false ? null : await midnightDiagnostics(midnightUrls.appName).catch(() => null);
 
     // Upsert, not update: a destroy removes the row, and an update would then
     // match nothing — leaving the console with no persisted state at all.
@@ -301,18 +351,51 @@ export const checkFullStack = createServerFn({ method: "POST" })
         health: identusHealth,
         status: identusStatus,
         ready: identusHealth.ready,
-        logTail: identusLog,
         // Without a stored admin key the probes cannot run at all — the UI needs
         // to say "reconnect" rather than show a spinner that never resolves.
         hasKey: Boolean(conn?.api_key),
         exists: identusExists,
       },
-      midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady, diagnostics: midnightDiag, exists: midnightExists },
+      midnight: { urls: midnightUrls, machines: midnightMachines, probes: midnightProbes, status: midnightStatus, ready: midnightReady, exists: midnightExists },
       allReady: identusHealth.ready && midnightReady,
       appPrefix: data.appPrefix,
     };
 
   });
+
+/**
+ * The slow half of the old readiness check: exec-based log and RPC reads that
+ * only matter once a half is known to be unhealthy. Fetched separately and on a
+ * slower interval, so a hanging exec degrades to "no log captured" instead of
+ * killing the readiness response.
+ */
+export const stackDiagnostics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { appPrefix: string; identus?: boolean; midnight?: boolean }) => input)
+  .handler(async ({ data }) => {
+    const { agentLogTail } = await import("@/lib/identus/fly.server");
+    const { midnightDiagnostics } = await import("@/lib/midnight/fly.server");
+
+    const identusApp = `${data.appPrefix}-identus`;
+    const midnightApp = `${data.appPrefix}-midnight`;
+    const EXEC_TIMEOUT = 20000;
+
+    const [logTail, diagnostics] = await Promise.all([
+      data.identus === false
+        ? Promise.resolve(null)
+        : withTimeout(agentLogTail(identusApp), EXEC_TIMEOUT, null as string | null),
+      data.midnight === false
+        ? Promise.resolve(null)
+        : withTimeout(
+            midnightDiagnostics(midnightApp),
+            EXEC_TIMEOUT,
+            null as Awaited<ReturnType<typeof midnightDiagnostics>> | null,
+          ),
+    ]);
+
+    return { logTail, diagnostics, appPrefix: data.appPrefix };
+  });
+
 
 /** Tears down both halves of an IPS stack. 404s on Fly are treated as already-gone. */
 export const destroyFullStack = createServerFn({ method: "POST" })
