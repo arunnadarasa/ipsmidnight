@@ -16,6 +16,27 @@ export const IDENTUS_DB = {
   databases: ["pollux", "connect", "agent", "node"] as const,
 } as const;
 
+export type IdentusDatabasePasswords = {
+  superuser: string;
+  appRole: string;
+};
+
+/** Database identities expected by Identus Cloud Agent 1.40. */
+export function cloudAgentDatabaseEnv(passwords: IdentusDatabasePasswords) {
+  return {
+    POLLUX_DB_USER: "pollux-application-user",
+    POLLUX_DB_PASSWORD: passwords.appRole,
+    CONNECT_DB_USER: "connect-application-user",
+    CONNECT_DB_PASSWORD: passwords.appRole,
+    AGENT_DB_USER: "agent-application-user",
+    AGENT_DB_PASSWORD: passwords.appRole,
+  } as const;
+}
+
+function sqlLiteral(value: string) {
+  return value.replaceAll("'", "''");
+}
+
 /**
  * Four separate databases keep the agent's schema migrations from colliding.
  *
@@ -27,11 +48,12 @@ export const IDENTUS_DB = {
  * Runs only while the Postgres data directory is empty.
  */
 export function postgresInitSql(appRolePassword: string) {
+  const password = sqlLiteral(appRolePassword);
   return [
     ...IDENTUS_DB.databases.map(
       (db) => `DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${db}-application-user') THEN
-    CREATE ROLE "${db}-application-user" LOGIN PASSWORD '${appRolePassword}';
+    CREATE ROLE "${db}-application-user" LOGIN PASSWORD '${password}';
   END IF;
 END $$;`,
     ),
@@ -39,7 +61,10 @@ END $$;`,
     ...IDENTUS_DB.databases.flatMap((db) => [
       `\\connect ${db}`,
       `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${db}-application-user";`,
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO "${db}-application-user";`,
       `GRANT USAGE, CREATE ON SCHEMA public TO "${db}-application-user";`,
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${db}-application-user";`,
+      `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${db}-application-user";`,
     ]),
   ].join("\n");
 }
