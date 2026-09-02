@@ -132,7 +132,28 @@ export function mintAdminKey() {
 
 type MachineKind = "postgres" | "prism-node" | "cloud-agent";
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string) {
+/**
+ * Reuses the agent's log volume in the region or creates it. Returns null on
+ * failure so a missing volume degrades to an ephemeral log rather than blocking
+ * provisioning altogether.
+ */
+async function ensureLogVolume(appName: string, region: string): Promise<string | null> {
+  try {
+    const volumes =
+      (await flyOptional<{ id: string; name: string; region: string }[]>(`/apps/${appName}/volumes`)) ?? [];
+    const existing = volumes.find((v) => v.name === AGENT_LOG_VOLUME && v.region === region);
+    if (existing) return existing.id;
+    const created = await fly<{ id: string }>(`/apps/${appName}/volumes`, {
+      method: "POST",
+      body: JSON.stringify({ name: AGENT_LOG_VOLUME, region, size_gb: 1 }),
+    });
+    return created.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVolumeId?: string | null) {
   // Unique per Fly app: tenants share one Fly organisation/private network, so a
   // shared password would let any reachable machine open another tenant's DB.
   const db = identusDbCreds(appName);
