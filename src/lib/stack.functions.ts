@@ -373,7 +373,7 @@ export const stackDiagnostics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { appPrefix: string; identus?: boolean; midnight?: boolean }) => input)
   .handler(async ({ data }) => {
-    const { agentBootLog } = await import("@/lib/identus/fly.server");
+    const { agentBootLog, identusDbProbe } = await import("@/lib/identus/fly.server");
     const { midnightDiagnostics } = await import("@/lib/midnight/fly.server");
 
     const identusApp = `${data.appPrefix}-identus`;
@@ -387,7 +387,7 @@ export const stackDiagnostics = createServerFn({ method: "POST" })
       reason: null,
     };
 
-    const [agentLog, diagnostics] = await Promise.all([
+    const [agentLog, diagnostics, dbProbe] = await Promise.all([
       data.identus === false
         ? Promise.resolve(emptyLog)
         : withTimeout(agentBootLog(identusApp), EXEC_TIMEOUT, emptyLog as Awaited<ReturnType<typeof agentBootLog>>),
@@ -398,10 +398,14 @@ export const stackDiagnostics = createServerFn({ method: "POST" })
             EXEC_TIMEOUT,
             null as Awaited<ReturnType<typeof midnightDiagnostics>> | null,
           ),
+      data.identus === false
+        ? Promise.resolve(null)
+        : withTimeout(identusDbProbe(identusApp), EXEC_TIMEOUT, null as Awaited<ReturnType<typeof identusDbProbe>>),
     ]);
 
-    return { logTail: agentLog.summary, agentLog, diagnostics, appPrefix: data.appPrefix };
+    return { logTail: agentLog.summary, agentLog, diagnostics, dbProbe, appPrefix: data.appPrefix };
   });
+
 
 
 /** Tears down both halves of an IPS stack. 404s on Fly are treated as already-gone. */
