@@ -702,7 +702,10 @@ export async function agentBootLog(appName: string): Promise<AgentBootLog> {
         // context in the drawer, but must never become the timeline diagnosis for
         // a newer repair attempt.
         const current = sections[0] ?? raw;
-        const summary = pickErrorText(current);
+        const currentHasFailure =
+          (current.includes(AGENT_EXIT_MARKER) && !/AGENT_EXIT=0\b/.test(current)) ||
+          /\bERROR:|caused by|does not exist|denied|refused|unknownhost|out of memory|fatal|exception|failed/i.test(current);
+        const summary = currentHasFailure ? pickErrorText(current) : null;
         if (summary) {
           return { summary, raw: raw.slice(-9000), source: "boot-log", reason: null };
         }

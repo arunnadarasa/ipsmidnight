@@ -848,7 +848,7 @@ function HalfCard({
 
         {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (
           <details className="rounded-xl border border-border bg-card/60 px-2.5 py-1.5">
-            <summary className="cursor-pointer text-[11px] text-muted-foreground">Boot log</summary>
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Current and previous boot logs</summary>
             {bootLog.raw ? (
               <>
                 <div className="mt-1.5 flex justify-end">
