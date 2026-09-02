@@ -218,6 +218,30 @@ export type Database = {
         }
         Relationships: []
       }
+      identus_db_credentials: {
+        Row: {
+          app_name: string
+          app_role_password: string
+          created_at: string
+          superuser_password: string
+          updated_at: string
+        }
+        Insert: {
+          app_name: string
+          app_role_password: string
+          created_at?: string
+          superuser_password: string
+          updated_at?: string
+        }
+        Update: {
+          app_name?: string
+          app_role_password?: string
+          created_at?: string
+          superuser_password?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ips_bundles: {
         Row: {
           bundle: Json

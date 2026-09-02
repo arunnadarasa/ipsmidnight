@@ -37,6 +37,73 @@ function sqlLiteral(value: string) {
   return value.replaceAll("'", "''");
 }
 
+/** Shell-single-quote escape for values interpolated into an exec script. */
+function shellLiteral(value: string) {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** The three login roles the Cloud Agent authenticates as. */
+export const APP_ROLES = ["pollux-application-user", "connect-application-user", "agent-application-user"] as const;
+
+/** Database each application role must be able to log into. */
+export const APP_ROLE_DATABASES = {
+  "pollux-application-user": "pollux",
+  "connect-application-user": "connect",
+  "agent-application-user": "agent",
+} as const;
+
+/**
+ * Resets every application role's password in place.
+ *
+ * The Postgres init script only runs against an empty data directory, so a
+ * password mismatch on an existing volume cannot be fixed by re-applying config.
+ * `ALTER ROLE` makes the repair path idempotent without destroying data.
+ */
+export function resetAppRolesSql(appRolePassword: string) {
+  const password = sqlLiteral(appRolePassword);
+  return APP_ROLES.map((role) => `ALTER ROLE "${role}" WITH LOGIN PASSWORD '${password}';`).join("\n");
+}
+
+/** Markers the probe/reset scripts print, parsed back by the server. */
+export const DB_PROBE_MARKERS = {
+  roles: "ROLES=",
+  auth: "AUTH=",
+  reset: "RESET=",
+} as const;
+
+/**
+ * Script run inside the Postgres machine: lists the application roles that
+ * exist, then attempts a real TCP login as `pollux-application-user` with the
+ * password the agent is configured with. This is what turns "we think the
+ * credentials match" into an observed fact.
+ */
+export function postgresProbeScript(appRolePassword: string) {
+  const pw = shellLiteral(appRolePassword);
+  return [
+    `roles=$(psql -U postgres -d postgres -tAc "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname like '%-application-user'" 2>&1 | tr -d '[:space:]')`,
+    `echo "${DB_PROBE_MARKERS.roles}$roles"`,
+    `auth=$(PGPASSWORD=${pw} psql -h 127.0.0.1 -U pollux-application-user -d pollux -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
+    `echo "${DB_PROBE_MARKERS.auth}$auth"`,
+  ].join("; ");
+}
+
+/** Script that resets the roles' passwords (creating any missing role first). */
+export function postgresResetScript(appRolePassword: string) {
+  const create = APP_ROLES.map(
+    (role) =>
+      `DO $do$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}') THEN CREATE ROLE "${role}" LOGIN PASSWORD '${sqlLiteral(appRolePassword)}'; END IF; END $do$;`,
+  ).join("\n");
+  const grants = Object.entries(APP_ROLE_DATABASES)
+    .map(
+      ([role, db]) =>
+        `\\connect ${db}\nGRANT USAGE, CREATE ON SCHEMA public TO "${role}";\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${role}";\nGRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${role}";`,
+    )
+    .join("\n");
+  const sql = [create, resetAppRolesSql(appRolePassword), grants].join("\n");
+  return `printf '%s' ${shellLiteral(sql)} | psql -U postgres -d postgres -v ON_ERROR_STOP=0 2>&1 | tail -n 5; echo "${DB_PROBE_MARKERS.reset}$?"`;
+}
+
+
 /**
  * Four separate databases keep the agent's schema migrations from colliding.
  *

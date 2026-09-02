@@ -70,6 +70,9 @@ type DiagnosticsResult = {
     source: string;
     reason: string | null;
   } | null;
+  /** Observed Postgres credential state for the agent, or null when unchecked. */
+  dbProbe?: { roles: string[]; authOk: boolean | null; detail: string | null } | null;
+
   diagnostics: {
     indexerLog: string | null;
     nodeLog: string | null;
@@ -633,6 +636,8 @@ function StackDetail({
                 machines={identusMachines}
                 steps={identusStepList}
                 bootLog={identusAbsent ? null : stackDiags?.agentLog ?? null}
+                dbProbe={identusAbsent ? null : stackDiags?.dbProbe ?? null}
+
                 startedAt={identusAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
                 onRetry={onCheck}
@@ -705,6 +710,8 @@ function HalfCard({
   machines,
   steps,
   bootLog,
+  dbProbe,
+
   startedAt,
   regionLabel,
   onRetry,
@@ -728,6 +735,9 @@ function HalfCard({
   steps: StackStep[];
   /** Full boot-log tail for this half, when one was captured. */
   bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
+  /** Observed state of the agent's database login, never assumed. */
+  dbProbe?: { roles: string[]; authOk: boolean | null; detail: string | null } | null;
+
   startedAt: string | null;
   regionLabel?: string | null;
   onRetry?: () => void;
@@ -797,6 +807,26 @@ function HalfCard({
             {...(retrying !== undefined ? { retrying } : {})}
           />
         )}
+
+        {!absent && dbProbe ? (
+          <div className="rounded-xl border border-border bg-card/60 px-3 py-2 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <StatusDot status={dbProbe.authOk === true ? "ok" : dbProbe.authOk === false ? "error" : "pending"} />
+              <span className="text-muted-foreground">
+                Database credentials:{" "}
+                {dbProbe.authOk === true
+                  ? "agent login verified"
+                  : dbProbe.authOk === false
+                    ? "login rejected"
+                    : "not checked"}
+              </span>
+            </div>
+            {dbProbe.roles.length ? (
+              <p className="mt-1 break-words text-muted-foreground">Roles: {dbProbe.roles.join(", ")}</p>
+            ) : null}
+            {dbProbe.detail ? <p className="mt-1 break-words text-muted-foreground">{dbProbe.detail}</p> : null}
+          </div>
+        ) : null}
 
 
         {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (

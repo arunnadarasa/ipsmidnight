@@ -11,6 +11,10 @@ import {
   JAVA_TOOL_OPTIONS,
   cloudAgentDatabaseEnv,
   postgresInitSql,
+  postgresProbeScript,
+  postgresResetScript,
+  DB_PROBE_MARKERS,
+
   identusStackUrls,
   type IdentusStackUrls,
 } from "./fly-shared";
@@ -177,10 +181,12 @@ async function ensureLogVolume(appName: string, region: string): Promise<string 
   }
 }
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVolumeId?: string | null) {
-  // Unique per Fly app: tenants share one Fly organisation/private network, so a
-  // shared password would let any reachable machine open another tenant's DB.
-  const db = identusDbCreds(appName);
+async function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVolumeId?: string | null) {
+  // Unique per Fly app and persisted server-side: tenants share one Fly
+  // organisation/private network, and a derived password would change whenever
+  // the Fly token is rotated while Postgres keeps the old one.
+  const db = await identusDbCreds(appName);
+
 
 
   const pgHost = `identus-postgres.process.${appName}.internal`;
@@ -322,7 +328,7 @@ function needsLogVolume(existing: FlyMachine, logVolumeId: string | null) {
 
 async function ensureMachine(appName: string, kind: MachineKind, region: string, adminKey: string) {
   const logVolumeId = kind === "cloud-agent" ? await ensureLogVolume(appName, region) : null;
-  const spec = machineSpec(kind, appName, adminKey, logVolumeId);
+  const spec = await machineSpec(kind, appName, adminKey, logVolumeId);
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const existing = machines.find((m) => m.name === spec.name);
   const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
@@ -339,6 +345,81 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
   return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
 }
 
+/** Runs a shell script inside a named machine of the Identus app. */
+async function execInMachine(appName: string, machineName: string, script: string, timeout = 20) {
+  const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
+  const machine = machines.find((m) => m.name === machineName);
+  if (!machine) return { ok: false as const, output: null, state: null };
+  if (machine.state !== "started") return { ok: false as const, output: null, state: machine.state };
+  const res = await flyOptional<{ exit_code?: number; stdout?: string; stderr?: string }>(
+    `/apps/${appName}/machines/${machine.id}/exec`,
+    { method: "POST", body: JSON.stringify({ command: ["/bin/sh", "-c", script], timeout }) },
+  );
+  const output = `${res?.stdout ?? ""}\n${res?.stderr ?? ""}`.trim();
+  return { ok: true as const, output, state: machine.state };
+}
+
+export type IdentusDbProbe = {
+  /** Application roles found in Postgres. */
+  roles: string[];
+  /** True when a real TCP login with the configured password succeeded. */
+  authOk: boolean | null;
+  detail: string | null;
+};
+
+/**
+ * Observes the Postgres side of the credential contract instead of assuming it:
+ * which `*-application-user` roles exist, and whether the password the agent is
+ * configured with actually authenticates. `authOk: null` means the probe could
+ * not run (machine not started, exec unavailable).
+ */
+export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | null> {
+  if (!flyConfigured()) return null;
+  try {
+    const creds = await identusDbCreds(appName);
+    const run = await execInMachine(appName, "identus-postgres", postgresProbeScript(creds.appRolePassword));
+    if (!run.ok || !run.output) {
+      return {
+        roles: [],
+        authOk: null,
+        detail: run.state
+          ? `Database machine is ${run.state} — credentials can only be probed while it is running.`
+          : null,
+      };
+    }
+    const rolesLine = run.output.split("\n").find((l) => l.startsWith(DB_PROBE_MARKERS.roles)) ?? "";
+    const authLine = run.output.split("\n").find((l) => l.startsWith(DB_PROBE_MARKERS.auth)) ?? "";
+    const roles = rolesLine
+      .slice(DB_PROBE_MARKERS.roles.length)
+      .split(",")
+      .map((r) => r.trim())
+      .filter((r) => r.endsWith("-application-user"));
+    const auth = authLine.slice(DB_PROBE_MARKERS.auth.length).trim();
+    const authOk = auth === "1";
+    return {
+      roles,
+      authOk,
+      detail: authOk ? null : auth ? auth.slice(0, 300) : "No response from the credential probe.",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Brings the Postgres roles in line with the stored credentials.
+ *
+ * The init script only executes against an empty data directory, so on an
+ * existing volume the only way to fix a mismatch is `ALTER ROLE` in place.
+ * Returns the post-reset probe so the caller can gate the agent on an observed
+ * success rather than a hopeful one.
+ */
+export async function repairIdentusDbCredentials(appName: string): Promise<IdentusDbProbe | null> {
+  const creds = await identusDbCreds(appName);
+  await execInMachine(appName, "identus-postgres", postgresResetScript(creds.appRolePassword), 30);
+  return identusDbProbe(appName);
+}
+
 /**
  * Re-applies the corrected machine specs (process-group metadata, env, ports) to
  * an already-provisioned app and restarts each machine.
@@ -353,13 +434,18 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
  * The cloud agent is recreated too when it is still missing the boot-log volume:
  * a mount cannot be added to a live machine, and without it every crash-loop
  * reads back as "the machine hasn't started" instead of the JVM exception.
+ *
+ * Between Postgres and the agent the database credentials are *observed* — and
+ * reset in place when they do not match — so the agent is not restarted into
+ * another `password authentication failed` boot.
  */
 export async function repairIdentusStack(appName: string, adminKey: string, region: string) {
   const machines = (await flyOptional<FlyMachine[]>(`/apps/${appName}/machines`)) ?? [];
   const logVolumeId = await ensureLogVolume(appName, region);
   const repaired: string[] = [];
+  let dbProbe: IdentusDbProbe | null = null;
   for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
-    const spec = machineSpec(kind, appName, adminKey, kind === "cloud-agent" ? logVolumeId : null);
+    const spec = await machineSpec(kind, appName, adminKey, kind === "cloud-agent" ? logVolumeId : null);
     const existing = machines.find((m) => m.name === spec.name);
     const body = machineBody(spec as { name: string; config: Record<string, unknown> }, region);
     const recreate =
@@ -379,10 +465,19 @@ export async function repairIdentusStack(appName: string, adminKey: string, regi
       await fly(`/apps/${appName}/machines`, { method: "POST", body });
     }
 
+    // Gate the agent on credentials that are known to work.
+    if (kind === "prism-node") {
+      dbProbe = await identusDbProbe(appName);
+      if (dbProbe?.authOk !== true) {
+        dbProbe = await repairIdentusDbCredentials(appName);
+      }
+    }
+
     repaired.push(spec.name);
   }
-  return { appName, repaired };
+  return { appName, repaired, dbProbe };
 }
+
 
 
 export type IdentusProvisionResult = IdentusStackUrls & {
