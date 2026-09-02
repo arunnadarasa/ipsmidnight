@@ -239,8 +239,11 @@ function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVo
         DIDCOMM_SERVICE_URL: urls.didcommUrl,
         JAVA_TOOL_OPTIONS,
       },
-      // Capture the agent's stdout to a file we can read back over exec.
+      // Capture the agent's stdout to a file we can read back over exec. The
+      // volume keeps that file across the restart that follows a crash — without
+      // it the failing boot's log is gone before anything can read it.
       init: { exec: [...AGENT_INIT_EXEC] },
+      ...(logVolumeId ? { mounts: [{ volume: logVolumeId, path: AGENT_LOG_DIR }] } : {}),
       guest: { cpu_kind: "performance", cpus: 2, memory_mb: 4096 },
 
       services: [
