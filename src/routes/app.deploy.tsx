@@ -70,6 +70,9 @@ type DiagnosticsResult = {
     source: string;
     reason: string | null;
   } | null;
+  /** Observed Postgres credential state for the agent, or null when unchecked. */
+  dbProbe?: { roles: string[]; authOk: boolean | null; detail: string | null } | null;
+
   diagnostics: {
     indexerLog: string | null;
     nodeLog: string | null;
