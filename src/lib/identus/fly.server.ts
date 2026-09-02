@@ -90,7 +90,7 @@ async function fly<T>(path: string, init?: RequestInit & { timeoutMs?: number })
 }
 
 
-async function flyOptional<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function flyOptional<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T | null> {
   try {
     return await fly<T>(path, init);
   } catch (err) {
