@@ -65,7 +65,10 @@ export function flyConfigured() {
 
 function token() {
   const t = process.env["FLY_API_TOKEN"];
-  if (!t) throw new Error("FLY_API_TOKEN is not configured for this project.");
+  if (!t)
+    throw new Error(
+      "Fly.io hosting isn't configured: the FLY_API_TOKEN secret is missing from the server environment. Add or re-save it in project secrets, then retry this repair.",
+    );
   return t;
 }
 
