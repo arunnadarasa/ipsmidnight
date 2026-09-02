@@ -369,11 +369,21 @@ async function execInMachine(appName: string, machineName: string, script: strin
 export type IdentusDbProbe = {
   /** Application roles found in Postgres. */
   roles: string[];
-  /** True when a real TCP login with the configured password succeeded. */
+  /**
+   * True only when a password-checked login over the machine's private network
+   * address succeeded — the same path the cloud agent takes. Never set from a
+   * loopback login, which initdb's host rules trust unconditionally.
+   */
   authOk: boolean | null;
   /** Whether the active cloud-agent machine carries the proven credential. */
   agentConfigMatches: boolean | null;
   detail: string | null;
+  /** Address the probe authenticated against (a 6PN address, not loopback). */
+  probeHost: string | null;
+  /** Stored password verifier per role, e.g. `pollux-application-user:scram`. */
+  verifiers: string[];
+  /** Effective host authentication rules, for the diagnostics drawer. */
+  hba: string | null;
 };
 
 function delay(ms: number) {
@@ -390,52 +400,76 @@ async function activeAgentCredentialMatches(appName: string, appRolePassword: st
 
 /**
  * Observes the Postgres side of the credential contract instead of assuming it:
- * which `*-application-user` roles exist, and whether the password the agent is
- * configured with actually authenticates. `authOk: null` means the probe could
- * not run (machine not started, exec unavailable).
+ * which `*-application-user` roles exist, how their passwords are stored, and
+ * whether the configured password actually authenticates *remotely*.
+ * `authOk: null` means the probe could not run (machine not started, exec
+ * unavailable) — it must never be reported as success.
  */
 export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | null> {
   if (!flyConfigured()) return null;
+  const unknown = (detail: string | null): IdentusDbProbe => ({
+    roles: [],
+    authOk: null,
+    agentConfigMatches: null,
+    detail,
+    probeHost: null,
+    verifiers: [],
+    hba: null,
+  });
   try {
     const creds = await identusDbCreds(appName);
     const run = await execInMachine(appName, "identus-postgres", postgresProbeScript(creds.appRolePassword));
     if (!run.ok || !run.output) {
-      return {
-        roles: [],
-        authOk: null,
-        agentConfigMatches: null,
-        detail: run.state
-          ? `Database machine is ${run.state} — credentials can only be probed while it is running.`
-          : null,
-      };
+      return unknown(
+        run.state ? `Database machine is ${run.state} — credentials can only be probed while it is running.` : null,
+      );
     }
-    const rolesLine = run.output.split("\n").find((l) => l.startsWith(DB_PROBE_MARKERS.roles)) ?? "";
-    const authLine = run.output.split("\n").find((l) => l.startsWith(DB_PROBE_MARKERS.auth)) ?? "";
-    const roles = rolesLine
-      .slice(DB_PROBE_MARKERS.roles.length)
+    const lines = run.output.split("\n");
+    const marker = (key: string) => {
+      const line = lines.find((l) => l.trim().startsWith(key));
+      return line ? line.trim().slice(key.length).trim() : "";
+    };
+    const roles = marker(DB_PROBE_MARKERS.roles)
       .split(",")
       .map((r) => r.trim())
       .filter((r) => r.endsWith("-application-user"));
-    const auth = authLine.slice(DB_PROBE_MARKERS.auth.length).trim();
-    const authOk = auth === "1";
+    const verifiers = marker(DB_PROBE_MARKERS.verifier)
+      .split(",")
+      .map((v) => v.trim())
+      .filter((v) => v.includes(":"));
+    const hbaRaw = marker(DB_PROBE_MARKERS.hba);
+    const hba = hbaRaw ? hbaRaw.slice(0, 1200) : null;
+    const probeHost = marker(DB_PROBE_MARKERS.host) || null;
+    const auth = marker(DB_PROBE_MARKERS.auth);
+    // Fail closed: no private address means no remote login was attempted.
+    const authOk = auth === "1" && Boolean(probeHost);
     const failedRoles = Object.entries({
       POLLUX: "pollux-application-user",
       CONNECT: "connect-application-user",
       AGENT: "agent-application-user",
     })
-      .filter(([key]) => !run.output?.split("\n").some((line) => line.trim() === `AUTH_${key}=1`))
+      .filter(([key]) => !lines.some((line) => line.trim() === `AUTH_${key}=1`))
       .map(([, role]) => role);
+    const mismatched = verifiers.filter((v) => !v.endsWith(":scram"));
     const agentConfigMatches = await activeAgentCredentialMatches(appName, creds.appRolePassword);
     return {
       roles,
+      verifiers,
+      hba,
+      probeHost,
       authOk,
       agentConfigMatches,
       detail: !authOk
-        ? failedRoles.length
-          ? `Login rejected for ${failedRoles.join(", ")}.`
-          : auth
-            ? auth.slice(0, 300)
-            : "No response from the credential probe."
+        ? [
+            !probeHost ? "Could not determine the database machine's private address, so no remote login was attempted." : null,
+            failedRoles.length ? `Remote password login rejected for ${failedRoles.join(", ")}.` : null,
+            mismatched.length
+              ? `Stored password verifier does not match the required scheme: ${mismatched.join(", ")}.`
+              : null,
+            !failedRoles.length && !mismatched.length && auth ? auth.slice(0, 200) : null,
+          ]
+            .filter(Boolean)
+            .join(" ") || "No response from the credential probe."
         : agentConfigMatches === false
           ? "The active cloud-agent machine still has stale database credentials."
           : null,
@@ -443,6 +477,7 @@ export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | 
   } catch {
     return null;
   }
+
 }
 
 /**
