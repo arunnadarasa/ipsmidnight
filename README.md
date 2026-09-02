@@ -267,7 +267,17 @@ This section is the honest part. Bringing up Midnight and Identus on Fly Machine
 11. **Distinguish "submitted" from "verified" in the data model.** The first version treated a transaction hash as proof. Persisting a separate `verified_at` / on-ledger flag — and making the UI's primary action "Check ledger" only after an anchor exists — keeps the trust story honest: submission is a claim, membership is the proof.
 12. **Bring the contract lifecycle into the UI on day one.** Doing deploy/anchor/verify from a terminal, then porting it, meant two sources of truth and a UI that lagged the scripts. Next time the runner + scripts are the only path; the terminal is never the default.
 
+### Ecosystem watch — Midnight-native DID and VC
+
+The identity half of this stack has a plausible Midnight-native future, and the credential half does not yet. Recording the split so the next person does not re-research it:
+
+- **DID layer: a path exists.** `midnight-did` ships a Compact DID contract plus a TypeScript mapping layer to W3C DID documents at `0.5.0`; resolver service, DID manager and key custody live in a separate `midnight-did-resolver` repo with nothing published to npm. Resolution is an indexer read of contract state — the same shape as our anchor verification.
+- **VC layer: no path yet.** `midnight-verifiable-credentials` was created in December 2025, publishes no packages, and its open issues are dominated by dev-tooling work rather than credential features. Credential formats, selective disclosure and revocation are undocumented.
+- **The two must move together.** Migrating DIDs without credential verification produces a DID that resolves and a credential nobody can check — worse than the status quo, because it *looks* complete. Until the VC repo ships, issuance and verification stay an Identus (or hand-rolled JOSE) problem.
+- **A DID contract is an addition, not a replacement.** `IpsAnchorRegistry` stays exactly as it is; `did:midnight` would be a second contract, a second proving flow and a second thing that can be down.
+
 ---
+
 
 ## Local development and setup
 
