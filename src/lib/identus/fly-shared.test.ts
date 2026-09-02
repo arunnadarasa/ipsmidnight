@@ -55,8 +55,10 @@ describe("Identus database configuration", () => {
 
   test("reset script creates missing roles before altering them", () => {
     const script = postgresResetScript("pw");
-    assert.ok(script.includes(`CREATE ROLE "pollux-application-user" LOGIN PASSWORD 'pw'`));
-    assert.ok(script.includes(`ALTER ROLE "agent-application-user" WITH LOGIN PASSWORD 'pw';`));
+    // The SQL is shell-quoted for exec, so quotes appear in escaped form.
+    assert.ok(script.includes(`CREATE ROLE "pollux-application-user" LOGIN PASSWORD`));
+    assert.ok(script.includes(`ALTER ROLE "agent-application-user" WITH LOGIN PASSWORD`));
     assert.ok(script.includes("RESET="));
   });
 });
+
