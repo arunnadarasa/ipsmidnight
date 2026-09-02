@@ -45,12 +45,12 @@ export function cloudAgentCredentialConfigMatches(
   if (!env) return false;
   const expected = cloudAgentDatabaseEnv({ superuser: "", appRole: appRolePassword });
   return (
-    env.POLLUX_DB_USER === expected.POLLUX_DB_USER &&
-    env.POLLUX_DB_PASSWORD === expected.POLLUX_DB_PASSWORD &&
-    env.CONNECT_DB_USER === expected.CONNECT_DB_USER &&
-    env.CONNECT_DB_PASSWORD === expected.CONNECT_DB_PASSWORD &&
-    env.AGENT_DB_USER === expected.AGENT_DB_USER &&
-    env.AGENT_DB_PASSWORD === expected.AGENT_DB_PASSWORD
+    env["POLLUX_DB_USER"] === expected.POLLUX_DB_USER &&
+    env["POLLUX_DB_PASSWORD"] === expected.POLLUX_DB_PASSWORD &&
+    env["CONNECT_DB_USER"] === expected.CONNECT_DB_USER &&
+    env["CONNECT_DB_PASSWORD"] === expected.CONNECT_DB_PASSWORD &&
+    env["AGENT_DB_USER"] === expected.AGENT_DB_USER &&
+    env["AGENT_DB_PASSWORD"] === expected.AGENT_DB_PASSWORD
   );
 }
 
@@ -100,11 +100,20 @@ export const DB_PROBE_MARKERS = {
  */
 export function postgresProbeScript(appRolePassword: string) {
   const pw = shellLiteral(appRolePassword);
+  const authChecks = Object.entries(APP_ROLE_DATABASES).flatMap(([role, db]) => {
+    const key = role.replace("-application-user", "").toUpperCase();
+    return [
+      `${key.toLowerCase()}=$(PGPASSWORD=${pw} psql -h 127.0.0.1 -U ${role} -d ${db} -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
+      `echo "AUTH_${key}=$${key.toLowerCase()}"`,
+      `[ "$${key.toLowerCase()}" = "1" ] || auth_ok=0`,
+    ];
+  });
   return [
     `roles=$(psql -U postgres -d postgres -tAc "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname like '%-application-user'" 2>&1 | tr -d '[:space:]')`,
     `echo "${DB_PROBE_MARKERS.roles}$roles"`,
-    `auth=$(PGPASSWORD=${pw} psql -h 127.0.0.1 -U pollux-application-user -d pollux -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
-    `echo "${DB_PROBE_MARKERS.auth}$auth"`,
+    "auth_ok=1",
+    ...authChecks,
+    `echo "${DB_PROBE_MARKERS.auth}$auth_ok"`,
   ].join("; ");
 }
 

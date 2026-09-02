@@ -413,15 +413,24 @@ export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | 
       .filter((r) => r.endsWith("-application-user"));
     const auth = authLine.slice(DB_PROBE_MARKERS.auth.length).trim();
     const authOk = auth === "1";
+    const failedRoles = Object.entries({
+      POLLUX: "pollux-application-user",
+      CONNECT: "connect-application-user",
+      AGENT: "agent-application-user",
+    })
+      .filter(([key]) => !run.output?.split("\n").some((line) => line.trim() === `AUTH_${key}=1`))
+      .map(([, role]) => role);
     const agentConfigMatches = await activeAgentCredentialMatches(appName, creds.appRolePassword);
     return {
       roles,
       authOk,
       agentConfigMatches,
       detail: !authOk
-        ? auth
-          ? auth.slice(0, 300)
-          : "No response from the credential probe."
+        ? failedRoles.length
+          ? `Login rejected for ${failedRoles.join(", ")}.`
+          : auth
+            ? auth.slice(0, 300)
+            : "No response from the credential probe."
         : agentConfigMatches === false
           ? "The active cloud-agent machine still has stale database credentials."
           : null,
@@ -441,10 +450,13 @@ export async function identusDbProbe(appName: string): Promise<IdentusDbProbe | 
  */
 export async function repairIdentusDbCredentials(appName: string): Promise<IdentusDbProbe | null> {
   const creds = await identusDbCreds(appName);
-  await execInMachine(appName, "identus-postgres", postgresResetScript(creds.appRolePassword), 30);
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const probe = await identusDbProbe(appName);
     if (probe?.authOk === true) return probe;
+    // A started machine can precede Postgres readiness. Retry the idempotent
+    // reset as the database comes online instead of losing the only reset call
+    // to that startup window.
+    await execInMachine(appName, "identus-postgres", postgresResetScript(creds.appRolePassword), 30);
     if (attempt < 11) await delay(5_000);
   }
   return identusDbProbe(appName);

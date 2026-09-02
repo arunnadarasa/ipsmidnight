@@ -55,11 +55,14 @@ describe("Identus database configuration", () => {
     }
   });
 
-  test("probe script logs in over TCP as the agent's own role", () => {
+  test("probe script logs in over TCP as all agent application roles", () => {
     const script = postgresProbeScript("safe'password");
     assert.ok(script.includes("ROLES="));
     assert.ok(script.includes("AUTH="));
-    assert.ok(script.includes("-h 127.0.0.1 -U pollux-application-user"));
+    for (const role of ["pollux", "connect", "agent"]) {
+      assert.ok(script.includes(`-h 127.0.0.1 -U ${role}-application-user -d ${role}`));
+      assert.ok(script.includes(`AUTH_${role.toUpperCase()}=`));
+    }
     // Shell-escaped, so the quote cannot break out of the assignment.
     assert.ok(script.includes(`PGPASSWORD='safe'\\''password'`));
   });
