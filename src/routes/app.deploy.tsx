@@ -614,7 +614,7 @@ function StackDetail({
               <HalfCard
                 title="Identus Cloud Agent"
                 subtitle="Credential issuance"
-                status={identusAbsent ? "not provisioned" : identus?.status ?? stack.identus?.status ?? "unknown"}
+                status={identusAbsent ? "not provisioned" : checkFailed ? "unknown" : identus?.status ?? stack.identus?.status ?? "unknown"}
                 ready={identus?.ready ?? false}
                 loading={readinessLoading}
                 // A derived URL for an app that does not exist is a dead link.
@@ -623,7 +623,7 @@ function StackDetail({
                 error={stack.identus?.last_error}
                 readyTo={allReady ? "/app/identus" : null}
                 readyLabel="Publish DID & issue"
-                machines={identus?.machines}
+                machines={identusMachines}
                 steps={identusStepList}
                 startedAt={identusAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
@@ -637,7 +637,7 @@ function StackDetail({
               <HalfCard
                 title="Midnight Undeployed"
                 subtitle="On-chain anchoring"
-                status={midnightAbsent ? "not provisioned" : midnight?.status ?? stack.midnight?.status ?? "unknown"}
+                status={midnightAbsent ? "not provisioned" : checkFailed ? "unknown" : midnight?.status ?? stack.midnight?.status ?? "unknown"}
                 ready={midnight?.ready ?? false}
                 loading={readinessLoading}
                 url={midnightAbsent ? null : midnight?.urls.indexerUrl ?? stack.midnight?.indexer_url ?? null}
@@ -645,7 +645,7 @@ function StackDetail({
                 error={stack.midnight?.last_error}
                 readyTo={allReady ? "/app/midnight" : null}
                 readyLabel="Deploy contract & anchor"
-                machines={midnight?.machines}
+                machines={midnightMachines}
                 steps={midnightStepList}
                 startedAt={midnightAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
