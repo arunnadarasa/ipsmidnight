@@ -185,7 +185,11 @@ export function postgresResetScript(appRolePassword: string) {
 export function postgresInitSql(appRolePassword: string) {
   const password = sqlLiteral(appRolePassword);
   return [
+    // Must precede every CREATE ROLE: the verifier written here has to match the
+    // host authentication method the agent's remote connection is checked with.
+    PG_PASSWORD_ENCRYPTION,
     ...IDENTUS_DB.databases.map(
+
       (db) => `DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${db}-application-user') THEN
     CREATE ROLE "${db}-application-user" LOGIN PASSWORD '${password}';
