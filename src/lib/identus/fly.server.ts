@@ -342,7 +342,12 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
   if (existing) {
     // A mount can only be attached by replacing the machine. Only agent-internal
     // state lives on the agent machine, so recreating it is safe.
-    if (needsLogVolume(existing, logVolumeId)) {
+    //
+    // Postgres is likewise replaced rather than updated: a machine's root
+    // filesystem survives restarts, so its data directory is already
+    // initialised and the role-creating init script would never run again —
+    // leaving roles with whatever password the first boot used.
+    if (kind === "postgres" || needsLogVolume(existing, logVolumeId)) {
       await flyOptional(`/apps/${appName}/machines/${existing.id}?force=true`, { method: "DELETE" });
       return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
     }
@@ -351,6 +356,7 @@ async function ensureMachine(appName: string, kind: MachineKind, region: string,
   }
   return fly<FlyMachine>(`/apps/${appName}/machines`, { method: "POST", body });
 }
+
 
 /** Runs a shell script inside a named machine of the Identus app. */
 async function execInMachine(appName: string, machineName: string, script: string, timeout = 20) {
