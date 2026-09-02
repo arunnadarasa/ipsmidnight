@@ -589,6 +589,7 @@ export type IdentusProvisionResult = IdentusStackUrls & {
   created: boolean;
   adminKey: string;
   machines: { name: string; id: string; state: string }[];
+  dbProbe: IdentusDbProbe | null;
 };
 
 export async function provisionIdentusStack(input: {
@@ -604,13 +605,37 @@ export async function provisionIdentusStack(input: {
 
   const machines: { name: string; id: string; state: string }[] = [];
   // Postgres first: prism-node and the agent both migrate against it on boot.
-  for (const kind of ["postgres", "prism-node", "cloud-agent"] as const) {
+  const pg = await ensureMachine(appName, "postgres", input.region, adminKey);
+  machines.push({ name: pg.name ?? "identus-postgres", id: pg.id, state: pg.state ?? "created" });
+  await flyOptional(`/apps/${appName}/machines/${pg.id}/wait?state=started&timeout=60`);
+
+  // Gate on an observed remote password login before anything boots against the
+  // database: an agent started into a credential mismatch spends its whole boot
+  // crash-looping on `password authentication failed`.
+  const dbProbe = await ensureVerifiedDbCredentials(appName);
+
+  for (const kind of ["prism-node", "cloud-agent"] as const) {
     const m = await ensureMachine(appName, kind, input.region, adminKey);
     machines.push({ name: m.name ?? kind, id: m.id, state: m.state ?? "created" });
   }
 
-  return { ...identusStackUrls(appName), created, adminKey, machines };
+  return { ...identusStackUrls(appName), created, adminKey, machines, dbProbe };
 }
+
+/**
+ * Probes the database credentials and, when the remote login is not verified,
+ * resets the roles in place and re-probes. Throws with the observed reason
+ * rather than letting a caller proceed on an unverified credential.
+ */
+async function ensureVerifiedDbCredentials(appName: string): Promise<IdentusDbProbe | null> {
+  let probe = await identusDbProbe(appName);
+  if (probe?.authOk !== true) probe = await repairIdentusDbCredentials(appName);
+  if (probe?.authOk !== true) {
+    throw new Error(`Database credentials could not be verified: ${probe?.detail ?? "probe unavailable"}`);
+  }
+  return probe;
+}
+
 
 /**
  * Whether the Fly app itself exists. `null` means "cannot tell" (no token or an
