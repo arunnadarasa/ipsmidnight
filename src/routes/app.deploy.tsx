@@ -632,6 +632,7 @@ function StackDetail({
                 readyLabel="Publish DID & issue"
                 machines={identusMachines}
                 steps={identusStepList}
+                bootLog={identusAbsent ? null : stackDiags?.agentLog ?? null}
                 startedAt={identusAbsent ? null : stack.created_at}
                 regionLabel={`Region ${stack.region}`}
                 onRetry={onCheck}
