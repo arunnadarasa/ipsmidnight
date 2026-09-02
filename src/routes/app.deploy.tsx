@@ -730,6 +730,9 @@ function HalfCard({
   steps: StackStep[];
   /** Full boot-log tail for this half, when one was captured. */
   bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
+  /** Observed state of the agent's database login, never assumed. */
+  dbProbe?: { roles: string[]; authOk: boolean | null; detail: string | null } | null;
+
   startedAt: string | null;
   regionLabel?: string | null;
   onRetry?: () => void;
