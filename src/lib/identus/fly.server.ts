@@ -177,10 +177,12 @@ async function ensureLogVolume(appName: string, region: string): Promise<string 
   }
 }
 
-function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVolumeId?: string | null) {
-  // Unique per Fly app: tenants share one Fly organisation/private network, so a
-  // shared password would let any reachable machine open another tenant's DB.
-  const db = identusDbCreds(appName);
+async function machineSpec(kind: MachineKind, appName: string, adminKey: string, logVolumeId?: string | null) {
+  // Unique per Fly app and persisted server-side: tenants share one Fly
+  // organisation/private network, and a derived password would change whenever
+  // the Fly token is rotated while Postgres keeps the old one.
+  const db = await identusDbCreds(appName);
+
 
 
   const pgHost = `identus-postgres.process.${appName}.internal`;
