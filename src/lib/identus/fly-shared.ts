@@ -33,6 +33,27 @@ export function cloudAgentDatabaseEnv(passwords: IdentusDatabasePasswords) {
   } as const;
 }
 
+/**
+ * Confirms the active machine spec carries the same application-role password
+ * that was proven against Postgres. Keep this server-side: callers expose only
+ * the boolean result, never either credential value.
+ */
+export function cloudAgentCredentialConfigMatches(
+  env: Record<string, string> | undefined,
+  appRolePassword: string,
+) {
+  if (!env) return false;
+  const expected = cloudAgentDatabaseEnv({ superuser: "", appRole: appRolePassword });
+  return (
+    env["POLLUX_DB_USER"] === expected.POLLUX_DB_USER &&
+    env["POLLUX_DB_PASSWORD"] === expected.POLLUX_DB_PASSWORD &&
+    env["CONNECT_DB_USER"] === expected.CONNECT_DB_USER &&
+    env["CONNECT_DB_PASSWORD"] === expected.CONNECT_DB_PASSWORD &&
+    env["AGENT_DB_USER"] === expected.AGENT_DB_USER &&
+    env["AGENT_DB_PASSWORD"] === expected.AGENT_DB_PASSWORD
+  );
+}
+
 function sqlLiteral(value: string) {
   return value.replaceAll("'", "''");
 }
@@ -79,11 +100,20 @@ export const DB_PROBE_MARKERS = {
  */
 export function postgresProbeScript(appRolePassword: string) {
   const pw = shellLiteral(appRolePassword);
+  const authChecks = Object.entries(APP_ROLE_DATABASES).flatMap(([role, db]) => {
+    const key = role.replace("-application-user", "").toUpperCase();
+    return [
+      `${key.toLowerCase()}=$(PGPASSWORD=${pw} psql -h 127.0.0.1 -U ${role} -d ${db} -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
+      `echo "AUTH_${key}=$${key.toLowerCase()}"`,
+      `[ "$${key.toLowerCase()}" = "1" ] || auth_ok=0`,
+    ];
+  });
   return [
     `roles=$(psql -U postgres -d postgres -tAc "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname like '%-application-user'" 2>&1 | tr -d '[:space:]')`,
     `echo "${DB_PROBE_MARKERS.roles}$roles"`,
-    `auth=$(PGPASSWORD=${pw} psql -h 127.0.0.1 -U pollux-application-user -d pollux -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
-    `echo "${DB_PROBE_MARKERS.auth}$auth"`,
+    "auth_ok=1",
+    ...authChecks,
+    `echo "${DB_PROBE_MARKERS.auth}$auth_ok"`,
   ].join("; ");
 }
 
@@ -186,6 +216,7 @@ export const AGENT_CRASH_HOLD_SECONDS = 600;
 
 /** Marker the wrapper writes into the log when the JVM exits. */
 export const AGENT_EXIT_MARKER = "AGENT_EXIT=";
+export const AGENT_BOOT_MARKER = "AGENT_BOOT=";
 
 /**
  * Boot wrapper for the cloud agent. Fly's Machines API exposes no log endpoint,
@@ -204,7 +235,7 @@ export const AGENT_INIT_EXEC = [
   `mkdir -p ${AGENT_LOG_DIR}; ` +
     `if [ -f ${AGENT_LOG_HISTORY[0]} ]; then mv -f ${AGENT_LOG_HISTORY[0]} ${AGENT_LOG_HISTORY[1]}; fi; ` +
     `if [ -f ${AGENT_LOG_PATH} ]; then mv -f ${AGENT_LOG_PATH} ${AGENT_LOG_HISTORY[0]}; fi; ` +
-    `: > ${AGENT_LOG_PATH}; tail -n +1 -F ${AGENT_LOG_PATH} & ` +
+    `: > ${AGENT_LOG_PATH}; echo "${AGENT_BOOT_MARKER}$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ${AGENT_LOG_PATH}; tail -n +1 -F ${AGENT_LOG_PATH} & ` +
     `${AGENT_ENTRYPOINT} >> ${AGENT_LOG_PATH} 2>&1; c=$?; ` +
     `echo "${AGENT_EXIT_MARKER}$c" >> ${AGENT_LOG_PATH}; ` +
     `if [ "$c" != "0" ]; then sleep ${AGENT_CRASH_HOLD_SECONDS}; else sleep 1; fi; exit $c`,

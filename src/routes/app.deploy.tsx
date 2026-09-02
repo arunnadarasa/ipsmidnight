@@ -71,7 +71,7 @@ type DiagnosticsResult = {
     reason: string | null;
   } | null;
   /** Observed Postgres credential state for the agent, or null when unchecked. */
-  dbProbe?: { roles: string[]; authOk: boolean | null; detail: string | null } | null;
+  dbProbe?: { roles: string[]; authOk: boolean | null; agentConfigMatches: boolean | null; detail: string | null } | null;
 
   diagnostics: {
     indexerLog: string | null;
@@ -220,8 +220,12 @@ function DeployConsole() {
       if (!selected) throw new Error("No stack selected");
       return repairIdentus({ data: { appPrefix: selected.appPrefix, region: selected.region } });
     },
-    onSuccess: () => {
-      toast.success("Identus database recreated — the agent is rebooting. Midnight untouched.");
+    onSuccess: (result) => {
+      toast.success(
+        result.dbProbe?.authOk === true && result.dbProbe.agentConfigMatches === true
+          ? "Database login verified and a fresh agent boot started. Midnight untouched."
+          : "Identus repair applied; verification is still pending.",
+      );
       qc.invalidateQueries({ queryKey: ["stacks"] });
       void readiness.refetch();
     },
@@ -736,7 +740,7 @@ function HalfCard({
   /** Full boot-log tail for this half, when one was captured. */
   bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
   /** Observed state of the agent's database login, never assumed. */
-  dbProbe?: { roles: string[]; authOk: boolean | null; detail: string | null } | null;
+  dbProbe?: { roles: string[]; authOk: boolean | null; agentConfigMatches: boolean | null; detail: string | null } | null;
 
   startedAt: string | null;
   regionLabel?: string | null;
@@ -824,6 +828,19 @@ function HalfCard({
             {dbProbe.roles.length ? (
               <p className="mt-1 break-words text-muted-foreground">Roles: {dbProbe.roles.join(", ")}</p>
             ) : null}
+            <div className="mt-1 flex items-center gap-1.5">
+              <StatusDot
+                status={dbProbe.agentConfigMatches === true ? "ok" : dbProbe.agentConfigMatches === false ? "error" : "pending"}
+              />
+              <span className="text-muted-foreground">
+                Agent configuration:{" "}
+                {dbProbe.agentConfigMatches === true
+                  ? "verified credential loaded"
+                  : dbProbe.agentConfigMatches === false
+                    ? "stale credential detected"
+                    : "not checked"}
+              </span>
+            </div>
             {dbProbe.detail ? <p className="mt-1 break-words text-muted-foreground">{dbProbe.detail}</p> : null}
           </div>
         ) : null}
@@ -831,7 +848,7 @@ function HalfCard({
 
         {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (
           <details className="rounded-xl border border-border bg-card/60 px-2.5 py-1.5">
-            <summary className="cursor-pointer text-[11px] text-muted-foreground">Boot log</summary>
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Current and previous boot logs</summary>
             {bootLog.raw ? (
               <>
                 <div className="mt-1.5 flex justify-end">

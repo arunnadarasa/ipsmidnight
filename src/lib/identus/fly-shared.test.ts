@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  AGENT_BOOT_MARKER,
+  AGENT_INIT_EXEC,
+  cloudAgentCredentialConfigMatches,
   cloudAgentDatabaseEnv,
   postgresInitSql,
   postgresProbeScript,
@@ -22,6 +25,14 @@ describe("Identus database configuration", () => {
       AGENT_DB_PASSWORD: "application-secret",
     });
     assert.ok(!Object.values(env).includes("super-secret"));
+    assert.equal(cloudAgentCredentialConfigMatches(env, "application-secret"), true);
+    assert.equal(cloudAgentCredentialConfigMatches(env, "stale-secret"), false);
+  });
+
+  test("marks every new agent boot before starting the JVM", () => {
+    const script = AGENT_INIT_EXEC.join(" ");
+    assert.ok(script.includes(AGENT_BOOT_MARKER));
+    assert.ok(script.indexOf(AGENT_BOOT_MARKER) < script.indexOf("identus-cloud-agent"));
   });
 
   test("creates and grants every application role with an escaped password", () => {
@@ -44,11 +55,14 @@ describe("Identus database configuration", () => {
     }
   });
 
-  test("probe script logs in over TCP as the agent's own role", () => {
+  test("probe script logs in over TCP as all agent application roles", () => {
     const script = postgresProbeScript("safe'password");
     assert.ok(script.includes("ROLES="));
     assert.ok(script.includes("AUTH="));
-    assert.ok(script.includes("-h 127.0.0.1 -U pollux-application-user"));
+    for (const role of ["pollux", "connect", "agent"]) {
+      assert.ok(script.includes(`-h 127.0.0.1 -U ${role}-application-user -d ${role}`));
+      assert.ok(script.includes(`AUTH_${role.toUpperCase()}=`));
+    }
     // Shell-escaped, so the quote cannot break out of the assignment.
     assert.ok(script.includes(`PGPASSWORD='safe'\\''password'`));
   });
