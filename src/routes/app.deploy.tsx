@@ -798,6 +798,26 @@ function HalfCard({
           />
         )}
 
+        {!absent && dbProbe ? (
+          <div className="rounded-xl border border-border bg-card/60 px-3 py-2 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <StatusDot status={dbProbe.authOk === true ? "ok" : dbProbe.authOk === false ? "error" : "pending"} />
+              <span className="text-muted-foreground">
+                Database credentials:{" "}
+                {dbProbe.authOk === true
+                  ? "agent login verified"
+                  : dbProbe.authOk === false
+                    ? "login rejected"
+                    : "not checked"}
+              </span>
+            </div>
+            {dbProbe.roles.length ? (
+              <p className="mt-1 break-words text-muted-foreground">Roles: {dbProbe.roles.join(", ")}</p>
+            ) : null}
+            {dbProbe.detail ? <p className="mt-1 break-words text-muted-foreground">{dbProbe.detail}</p> : null}
+          </div>
+        ) : null}
+
 
         {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (
           <details className="rounded-xl border border-border bg-card/60 px-2.5 py-1.5">
