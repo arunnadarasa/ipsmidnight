@@ -21,6 +21,8 @@ import { FLY_REGIONS } from "@/lib/midnight/shared";
 import {
   provisionFullStack,
   checkFullStack,
+  stackDiagnostics,
+
   destroyFullStack,
   repairFullStack,
   repairIdentusOnly,
