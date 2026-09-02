@@ -42,7 +42,6 @@ type ReadinessResult = {
     health: { probes: { name: string; ok: boolean; status: number | null; detail: string }[]; ready: boolean };
     status: string;
     ready: boolean;
-    logTail?: string | null;
     hasKey?: boolean;
     exists?: boolean | null;
   };
@@ -52,19 +51,26 @@ type ReadinessResult = {
     probes: { indexer: { ok: boolean; status: number | null; detail: string }; proof: { ok: boolean; status: number | null; detail: string }; blockHeight: number | null };
     status: string;
     ready: boolean;
-    diagnostics?: {
-      indexerLog: string | null;
-      nodeLog: string | null;
-      nodeRpcFromNode: string | null;
-      nodeRpcFromIndexer: string | null;
-      ips?: string | null;
-    } | null;
     exists?: boolean | null;
   };
 
   allReady: boolean;
   appPrefix: string;
 };
+
+/** Slow exec-based reads, fetched separately from the fast readiness check. */
+type DiagnosticsResult = {
+  logTail: string | null;
+  diagnostics: {
+    indexerLog: string | null;
+    nodeLog: string | null;
+    nodeRpcFromNode: string | null;
+    nodeRpcFromIndexer: string | null;
+    ips?: string | null;
+  } | null;
+  appPrefix: string;
+};
+
 
 export const Route = createFileRoute("/app/deploy")({
   head: () => ({
