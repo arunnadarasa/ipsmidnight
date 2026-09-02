@@ -573,24 +573,40 @@ function StackDetail({
         </div>
       </div>
 
+      {checkError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+          <p className="font-medium">Couldn&apos;t reach the stack check.</p>
+          <p className="mt-1 break-words text-destructive/80">{checkError}</p>
+          <p className="mt-1 text-destructive/80">
+            The machines below show the last known state — this is not a sign that provisioning failed.
+          </p>
+          <Button variant="outline" size="sm" className="mt-2" onClick={onCheck} disabled={checking}>
+            {checking ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            Retry check
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {(() => {
           const identusStepList = identusSteps({
             appName: identus?.urls.appName ?? `${stack.appPrefix}-identus`,
-            machines: identus?.machines,
+            machines: identusMachines,
             probes: identus?.health.probes,
-            logTail: identus?.logTail ?? null,
+            logTail: stackDiags?.logTail ?? null,
             hasKey: identus?.hasKey ?? true,
             exists: identus?.exists ?? null,
+            checkFailed,
           });
           const midnightStepList = midnightSteps({
             appName: midnight?.urls.appName ?? `${stack.appPrefix}-midnight`,
-            machines: midnight?.machines,
+            machines: midnightMachines,
             probes: midnight?.probes,
-            diagnostics: midnight?.diagnostics ?? null,
+            diagnostics: stackDiags?.diagnostics ?? null,
             exists: midnight?.exists ?? null,
+            checkFailed,
           });
+
           const identusAbsent = identus?.exists === false && isNotProvisioned(identusStepList);
           const midnightAbsent = midnight?.exists === false && isNotProvisioned(midnightStepList);
           return (
