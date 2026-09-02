@@ -5,7 +5,11 @@ import {
   AGENT_INIT_EXEC,
   cloudAgentCredentialConfigMatches,
   cloudAgentDatabaseEnv,
+  PG_HOST_AUTH_METHOD,
+  PG_PASSWORD_ENCRYPTION,
+  POSTGRES_AUTH_ENV,
   postgresInitSql,
+
   postgresProbeScript,
   postgresResetScript,
   resetAppRolesSql,
