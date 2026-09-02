@@ -471,6 +471,8 @@ function StackDetail({
   stack,
   readiness,
   readinessLoading,
+  checkError,
+  diagnostics: stackDiags,
   checking,
   onCheck,
   onDestroy,
@@ -490,6 +492,8 @@ function StackDetail({
   stack: StackSummary;
   readiness: ReadinessResult | null | undefined;
   readinessLoading: boolean;
+  checkError: string | null;
+  diagnostics: DiagnosticsResult | null;
   checking: boolean;
   onCheck: () => void;
   onDestroy: () => void;
@@ -510,6 +514,12 @@ function StackDetail({
   const identus = readiness?.identus;
   const midnight = readiness?.midnight;
   const allReady = readiness?.allReady ?? false;
+  // No live payload and a failed check = we know nothing. Fall back to the last
+  // machine states persisted on the deployment row rather than an empty list.
+  const identusMachines = identus?.machines ?? stack.identus?.machines ?? undefined;
+  const midnightMachines = midnight?.machines ?? stack.midnight?.machines ?? undefined;
+  const checkFailed = Boolean(checkError && !readiness);
+
 
   return (
     <div className="space-y-4">
