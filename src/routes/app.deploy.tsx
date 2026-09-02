@@ -71,7 +71,15 @@ type DiagnosticsResult = {
     reason: string | null;
   } | null;
   /** Observed Postgres credential state for the agent, or null when unchecked. */
-  dbProbe?: { roles: string[]; authOk: boolean | null; agentConfigMatches: boolean | null; detail: string | null } | null;
+  dbProbe?: {
+    roles: string[];
+    authOk: boolean | null;
+    agentConfigMatches: boolean | null;
+    detail: string | null;
+    verifiers?: string[];
+    hba?: string | null;
+    probeHost?: string | null;
+  } | null;
 
   diagnostics: {
     indexerLog: string | null;
@@ -740,7 +748,15 @@ function HalfCard({
   /** Full boot-log tail for this half, when one was captured. */
   bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
   /** Observed state of the agent's database login, never assumed. */
-  dbProbe?: { roles: string[]; authOk: boolean | null; agentConfigMatches: boolean | null; detail: string | null } | null;
+  dbProbe?: {
+    roles: string[];
+    authOk: boolean | null;
+    agentConfigMatches: boolean | null;
+    detail: string | null;
+    verifiers?: string[];
+    hba?: string | null;
+    probeHost?: string | null;
+  } | null;
 
   startedAt: string | null;
   regionLabel?: string | null;
@@ -819,14 +835,19 @@ function HalfCard({
               <span className="text-muted-foreground">
                 Database credentials:{" "}
                 {dbProbe.authOk === true
-                  ? "agent login verified"
+                  ? "remote password login verified"
                   : dbProbe.authOk === false
-                    ? "login rejected"
+                    ? "not verified — remote login failed"
                     : "not checked"}
               </span>
             </div>
             {dbProbe.roles.length ? (
               <p className="mt-1 break-words text-muted-foreground">Roles: {dbProbe.roles.join(", ")}</p>
+            ) : null}
+            {dbProbe.verifiers?.length ? (
+              <p className="mt-1 break-words text-muted-foreground">
+                Stored password type: {dbProbe.verifiers.join(", ")}
+              </p>
             ) : null}
             <div className="mt-1 flex items-center gap-1.5">
               <StatusDot
@@ -842,8 +863,17 @@ function HalfCard({
               </span>
             </div>
             {dbProbe.detail ? <p className="mt-1 break-words text-muted-foreground">{dbProbe.detail}</p> : null}
+            {dbProbe.hba ? (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-muted-foreground">Database host rules</summary>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] text-muted-foreground">
+                  {dbProbe.hba}
+                </pre>
+              </details>
+            ) : null}
           </div>
         ) : null}
+
 
 
         {!absent && bootLog && (bootLog.raw || bootLog.reason) ? (

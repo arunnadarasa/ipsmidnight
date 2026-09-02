@@ -5,7 +5,11 @@ import {
   AGENT_INIT_EXEC,
   cloudAgentCredentialConfigMatches,
   cloudAgentDatabaseEnv,
+  PG_HOST_AUTH_METHOD,
+  PG_PASSWORD_ENCRYPTION,
+  POSTGRES_AUTH_ENV,
   postgresInitSql,
+
   postgresProbeScript,
   postgresResetScript,
   resetAppRolesSql,
@@ -38,6 +42,8 @@ describe("Identus database configuration", () => {
   test("creates and grants every application role with an escaped password", () => {
     const sql = postgresInitSql("safe'password");
 
+    // The verifier scheme must be pinned before any role password is written.
+    assert.ok(sql.indexOf(PG_PASSWORD_ENCRYPTION) === 0);
     for (const database of ["pollux", "connect", "agent", "node"]) {
       assert.ok(sql.includes(`CREATE ROLE "${database}-application-user" LOGIN PASSWORD 'safe''password'`));
       assert.ok(sql.includes(`\\connect ${database}`));
@@ -46,7 +52,11 @@ describe("Identus database configuration", () => {
     }
   });
 
-
+  test("pins the image host auth method to the verifier scheme", () => {
+    assert.equal(POSTGRES_AUTH_ENV.POSTGRES_HOST_AUTH_METHOD, PG_HOST_AUTH_METHOD);
+    assert.ok(POSTGRES_AUTH_ENV.POSTGRES_INITDB_ARGS.includes(`--auth-host=${PG_HOST_AUTH_METHOD}`));
+    assert.ok(PG_PASSWORD_ENCRYPTION.includes(PG_HOST_AUTH_METHOD));
+  });
 
   test("resets every application role in place with an escaped password", () => {
     const sql = resetAppRolesSql("safe'password");
@@ -55,24 +65,30 @@ describe("Identus database configuration", () => {
     }
   });
 
-  test("probe script logs in over TCP as all agent application roles", () => {
+  test("probe script authenticates remotely, never over loopback", () => {
     const script = postgresProbeScript("safe'password");
     assert.ok(script.includes("ROLES="));
     assert.ok(script.includes("AUTH="));
+    assert.ok(script.includes("HOST="));
+    assert.ok(script.includes("VERIFIER="));
+    assert.ok(script.includes("HBA="));
+    // Loopback is trusted by initdb's rules, so it can never be the login path.
+    assert.ok(!script.includes("127.0.0.1 -U"));
     for (const role of ["pollux", "connect", "agent"]) {
-      assert.ok(script.includes(`-h 127.0.0.1 -U ${role}-application-user -d ${role}`));
+      assert.ok(script.includes(`-h "$pghost" -U ${role}-application-user -d ${role}`));
       assert.ok(script.includes(`AUTH_${role.toUpperCase()}=`));
     }
     // Shell-escaped, so the quote cannot break out of the assignment.
     assert.ok(script.includes(`PGPASSWORD='safe'\\''password'`));
   });
 
-  test("reset script creates missing roles before altering them", () => {
+  test("reset script pins the verifier scheme before creating or altering roles", () => {
     const script = postgresResetScript("pw");
     // The SQL is shell-quoted for exec, so quotes appear in escaped form.
-    assert.ok(script.includes(`CREATE ROLE "pollux-application-user" LOGIN PASSWORD`));
+    assert.ok(script.indexOf(PG_PASSWORD_ENCRYPTION) < script.indexOf(`CREATE ROLE "pollux-application-user"`));
     assert.ok(script.includes(`ALTER ROLE "agent-application-user" WITH LOGIN PASSWORD`));
     assert.ok(script.includes("RESET="));
   });
 });
+
 
