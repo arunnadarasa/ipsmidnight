@@ -958,6 +958,9 @@ export async function reconnectIdentusAgent(input: {
     created: false,
     adminKey,
     machines: after.map((m) => ({ name: m.name, id: m.id, state: m.state })),
+    // Endpoint repair does not touch database credentials; report "not checked".
+    dbProbe: null,
+
   };
 }
 
