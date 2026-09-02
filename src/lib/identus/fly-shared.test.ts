@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { cloudAgentDatabaseEnv, postgresInitSql } from "./fly-shared";
+import {
+  cloudAgentDatabaseEnv,
+  postgresInitSql,
+  postgresProbeScript,
+  postgresResetScript,
+  resetAppRolesSql,
+} from "./fly-shared";
+
 
 describe("Identus database configuration", () => {
   test("uses each dedicated application role with the application password", () => {
