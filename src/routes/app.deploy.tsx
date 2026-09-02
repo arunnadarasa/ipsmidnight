@@ -704,6 +704,7 @@ function HalfCard({
   readyLabel,
   machines,
   steps,
+  bootLog,
   startedAt,
   regionLabel,
   onRetry,
@@ -725,6 +726,8 @@ function HalfCard({
   readyLabel: string;
   machines?: MachineLike[] | undefined;
   steps: StackStep[];
+  /** Full boot-log tail for this half, when one was captured. */
+  bootLog?: { summary: string | null; raw: string | null; source: string; reason: string | null } | null;
   startedAt: string | null;
   regionLabel?: string | null;
   onRetry?: () => void;
@@ -736,6 +739,9 @@ function HalfCard({
   provisionLabel?: string;
 }) {
   const tone = ready ? "text-success" : status === "error" ? "text-destructive" : "text-muted-foreground";
+  // Machines left behind by an earlier repair can confuse the private-DNS
+  // picture, so name them instead of letting them sit silently in the drawer.
+  const stray = (machines ?? []).filter((m) => m.state === "stopped" || m.state === "failed");
   return (
     <Panel
       title={title}
