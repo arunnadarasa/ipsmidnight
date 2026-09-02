@@ -21,7 +21,11 @@ type FlyMachine = {
   name: string;
   state: string;
   region?: string;
-  config?: { env?: Record<string, string>; services?: { internal_port: number }[] };
+  config?: {
+    env?: Record<string, string>;
+    services?: { internal_port: number }[];
+    mounts?: { volume?: string; path?: string }[];
+  };
   checks?: { name: string; status: string; output?: string }[];
   events?: FlyEvent[];
 };
