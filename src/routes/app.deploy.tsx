@@ -63,6 +63,13 @@ type ReadinessResult = {
 /** Slow exec-based reads, fetched separately from the fast readiness check. */
 type DiagnosticsResult = {
   logTail: string | null;
+  /** Full boot-log tail plus why it is (or isn't) available. */
+  agentLog?: {
+    summary: string | null;
+    raw: string | null;
+    source: string;
+    reason: string | null;
+  } | null;
   diagnostics: {
     indexerLog: string | null;
     nodeLog: string | null;
