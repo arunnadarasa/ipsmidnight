@@ -90,28 +90,63 @@ export const DB_PROBE_MARKERS = {
   roles: "ROLES=",
   auth: "AUTH=",
   reset: "RESET=",
+  host: "HOST=",
+  hba: "HBA=",
+  verifier: "VERIFIER=",
 } as const;
 
 /**
- * Script run inside the Postgres machine: lists the application roles that
- * exist, then attempts a real TCP login as `pollux-application-user` with the
- * password the agent is configured with. This is what turns "we think the
- * credentials match" into an observed fact.
+ * Host authentication method demanded of every non-local connection, and the
+ * matching password verifier the roles are created with.
+ *
+ * These two MUST agree. A role whose password is stored as an MD5 verifier can
+ * never satisfy a `scram-sha-256` host rule (and vice versa): the connection is
+ * rejected with `password authentication failed`, which reads exactly like a
+ * wrong password even though the password is right.
+ */
+export const PG_HOST_AUTH_METHOD = "scram-sha-256";
+export const PG_PASSWORD_ENCRYPTION = `SET password_encryption = '${PG_HOST_AUTH_METHOD}';`;
+
+/** Environment that pins the image's auth method to {@link PG_HOST_AUTH_METHOD}. */
+export const POSTGRES_AUTH_ENV = {
+  POSTGRES_HOST_AUTH_METHOD: PG_HOST_AUTH_METHOD,
+  POSTGRES_INITDB_ARGS: `--auth-host=${PG_HOST_AUTH_METHOD} --auth-local=trust`,
+} as const;
+
+/**
+ * Script run inside the Postgres machine.
+ *
+ * It logs in as each application role with the password the agent is configured
+ * with — over the machine's own **private network address**, never `127.0.0.1`.
+ * initdb's generated `pg_hba.conf` trusts loopback, so a loopback login proves
+ * nothing about the password and turns the console green while the agent is
+ * still being rejected. It also reports the host rules and each role's stored
+ * verifier type, so a verifier/rule mismatch names itself.
  */
 export function postgresProbeScript(appRolePassword: string) {
   const pw = shellLiteral(appRolePassword);
   const authChecks = Object.entries(APP_ROLE_DATABASES).flatMap(([role, db]) => {
     const key = role.replace("-application-user", "").toUpperCase();
+    const v = key.toLowerCase();
     return [
-      `${key.toLowerCase()}=$(PGPASSWORD=${pw} psql -h 127.0.0.1 -U ${role} -d ${db} -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
-      `echo "AUTH_${key}=$${key.toLowerCase()}"`,
-      `[ "$${key.toLowerCase()}" = "1" ] || auth_ok=0`,
+      `${v}=$(PGPASSWORD=${pw} psql -h "$pghost" -U ${role} -d ${db} -tAc "select 1" 2>&1 | tr -d '[:space:]')`,
+      `echo "AUTH_${key}=$${v}"`,
+      `[ "$${v}" = "1" ] || auth_ok=0`,
     ];
   });
   return [
+    // The 6PN address of this machine: a real remote connection, subject to the
+    // same host rules the cloud agent hits. `|| true` keeps the script alive if
+    // the address cannot be read; the login below then reports the failure.
+    `pghost=$(ip -6 addr show 2>/dev/null | awk '/inet6 fdaa/{print $2}' | cut -d/ -f1 | head -n1)`,
+    `[ -n "$pghost" ] || pghost=$(hostname -i 2>/dev/null | awk '{print $1}')`,
+    `echo "${DB_PROBE_MARKERS.host}$pghost"`,
     `roles=$(psql -U postgres -d postgres -tAc "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname like '%-application-user'" 2>&1 | tr -d '[:space:]')`,
     `echo "${DB_PROBE_MARKERS.roles}$roles"`,
+    `echo "${DB_PROBE_MARKERS.verifier}$(psql -U postgres -d postgres -tAc "select string_agg(rolname || ':' || coalesce(case when rolpassword like 'SCRAM-SHA-256%' then 'scram' when rolpassword like 'md5%' then 'md5' else 'other' end, 'none'), ',' order by rolname) from pg_authid where rolname like '%-application-user'" 2>&1 | tr -d '[:space:]')`,
+    `echo "${DB_PROBE_MARKERS.hba}$(grep -Ev '^\\s*(#|$)' "$PGDATA/pg_hba.conf" 2>/dev/null | tr '\\n' ';' | tr -s ' ')"`,
     "auth_ok=1",
+    `[ -n "$pghost" ] || auth_ok=0`,
     ...authChecks,
     `echo "${DB_PROBE_MARKERS.auth}$auth_ok"`,
   ].join("; ");
@@ -129,9 +164,12 @@ export function postgresResetScript(appRolePassword: string) {
         `\\connect ${db}\nGRANT USAGE, CREATE ON SCHEMA public TO "${role}";\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${role}";\nGRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${role}";`,
     )
     .join("\n");
-  const sql = [create, resetAppRolesSql(appRolePassword), grants].join("\n");
+  // The encryption scheme must be set in the same session, before any role's
+  // password is written, or the verifier will not match the host rule.
+  const sql = [PG_PASSWORD_ENCRYPTION, create, resetAppRolesSql(appRolePassword), grants].join("\n");
   return `printf '%s' ${shellLiteral(sql)} | psql -U postgres -d postgres -v ON_ERROR_STOP=0 2>&1 | tail -n 5; echo "${DB_PROBE_MARKERS.reset}$?"`;
 }
+
 
 
 /**
