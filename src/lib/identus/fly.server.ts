@@ -16,6 +16,8 @@ import {
   postgresProbeScript,
   postgresResetScript,
   DB_PROBE_MARKERS,
+  POSTGRES_AUTH_ENV,
+
 
   identusStackUrls,
   type IdentusStackUrls,
