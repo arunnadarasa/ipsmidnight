@@ -170,15 +170,19 @@ export function identusSteps(input: {
   machines?: MachineLike[] | undefined;
   probes?: Probe[] | undefined;
   status?: string;
-  /** Last error line from the cloud-agent log, when the check pulled one. */
+  /** Last error line from the cloud-agent log, when diagnostics pulled one. */
   logTail?: string | null;
   /** False when no admin key is stored for this stack, so probes cannot run. */
   hasKey?: boolean;
   /** Whether the Fly app itself exists; false = never provisioned / destroyed. */
   exists?: boolean | null;
+  /** The readiness check errored — we have no live signal at all. */
+  checkFailed?: boolean;
 }): StackStep[] {
-  const { appName, machines, probes, logTail, hasKey = true, exists } = input;
+  const { appName, machines, probes, logTail, hasKey = true, exists, checkFailed } = input;
   if (exists === false) return notProvisionedSteps(IDENTUS_STEP_LABELS);
+  if (checkFailed && !machines?.length) return unknownSteps(IDENTUS_STEP_LABELS);
+
   // The app *name* is derived from the prefix, so it can never prove existence —
   // only a confirmed Fly app (or a running machine) counts as created.
   const created = exists === true || Boolean(machines?.length);
